@@ -1,0 +1,16 @@
+services:
+  app:
+    build: .
+    container_name: evoluta-hub
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - MONGO_URI=${MONGO_URI}
+      - JWT_SECRET=${JWT_SECRET}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+    volumes:
+      - ./content:/app/content
+    env_file:
+      - .env

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>eVOLUTA Hub</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:         #0A1128;
+      --surface:    #0F1629;
+      --surface2:   #1a1f35;
+      --border:     #2a2f45;
+      --text:       #E6EDF3;
+      --muted:      #8B949E;
+      --primary:    #F15BB5;
+      --primary-dim:#7B2CBF;
+      --accent:     #F58216;
+      --gradient:   linear-gradient(135deg, #F15BB5, #7B2CBF);
+      --red:        #F85149;
+      --radius:     6px;
+    }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; line-height: 1.5; }
+    #root { display: flex; min-height: 100vh; }
+
+    button, input, select, textarea { font-family: inherit; }
+    input, textarea { color: var(--text); }
+    input::placeholder { color: var(--muted); }
+
+    @media (max-width: 768px) {
+      body { font-size: 13px; }
+      :root { --radius: 4px; }
+    }
+
+    @media (max-width: 480px) {
+      body { font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+</html>
