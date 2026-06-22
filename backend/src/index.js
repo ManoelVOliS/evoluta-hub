@@ -12,6 +12,16 @@ mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/evoluta_hub
   .then(() => console.log('MongoDB conectado'))
   .catch(err => console.error('Erro MongoDB:', err))
 
+app.get('/health', (req, res) => {
+  const state = mongoose.connection.readyState
+  const mongo = state === 1 ? 'connected' : state === 2 ? 'connecting' : 'disconnected'
+  res.status(mongo === 'connected' ? 200 : 503).json({
+    status: mongo === 'connected' ? 'ok' : 'degraded',
+    mongo,
+    uptime: Math.floor(process.uptime())
+  })
+})
+
 app.use('/api/auth',    require('./routes/auth'))
 app.use('/api/backlog', require('./routes/backlog'))
 app.use('/api/plan',    require('./routes/plan'))
@@ -19,7 +29,9 @@ app.use('/api/trl',     require('./routes/trl'))
 app.use('/api/content', require('./routes/content'))
 app.use('/api/metrics', require('./routes/metrics'))
 app.use('/api/clients', require('./routes/clients'))
-app.use('/api/n8n',    require('./routes/n8n'))
+app.use('/api/n8n',       require('./routes/n8n'))
+app.use('/api/prospects', require('./routes/prospects'))
+app.use('/api/calendar',  require('./routes/calendar'))
 
 app.use(express.static(path.join(__dirname, '../public')))
 app.get('*', (req, res) => {

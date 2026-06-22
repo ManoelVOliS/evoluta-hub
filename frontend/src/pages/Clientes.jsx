@@ -5,7 +5,30 @@ import { extrairPlanilhas, extrairMetricas, gerarRelatorioHTML } from '../servic
 const MOTORS = ['CashBarber', 'Trink', 'AppBarber', 'Múltiplos', 'Outro']
 const MOTOR_COLOR = { CashBarber:'#3EBD7C', Trink:'#58A6FF', AppBarber:'#F15BB5', Múltiplos:'#F58216', Outro:'#8B949E' }
 
-const EMPTY_CLIENT = { empresa:'', cnpj:'', telefone:'', motor:'CashBarber', ativo:true }
+const RPT_STATUS_COLOR = { gerado:'#8B949E', revisado:'#58A6FF', enviado:'#3EBD7C' }
+const RPT_STATUS_NEXT  = { gerado:'revisado', revisado:'enviado', enviado:null }
+const RPT_STATUS_LABEL = { gerado:'Gerado', revisado:'Revisado', enviado:'Enviado' }
+
+const EMPTY_CLIENT = { empresa:'', cnpj:'', telefone:'', motor:'CashBarber', ativo:true, treinado:false, envia_planilha:false }
+
+const REVIEW_CAMPOS = [
+  { label:'Faturamento',   path:'financeiro.entrada',                tipo:'moeda'  },
+  { label:'Despesas',      path:'financeiro.saida',                  tipo:'moeda'  },
+  { label:'Comissões',     path:'financeiro.comissao_total',         tipo:'moeda'  },
+  { label:'Lucro Real',    path:'financeiro.lucro_real',             tipo:'moeda'  },
+  { label:'Retorno',       path:'clientes.base_total',               tipo:'numero' },
+  { label:'Novos clientes',path:'clientes.novos_marco',              tipo:'numero' },
+  { label:'Produtos',      path:'produtos.quantidade_total_vendida', tipo:'numero' },
+  { label:'Mês',           path:'meta.mes_analisado',                tipo:'texto'  },
+]
+const getNumPath = (obj, path) => path.split('.').reduce((o, k) => o?.[k] ?? '', obj)
+const setNumPath = (obj, path, value) => {
+  const keys = path.split('.'), clone = JSON.parse(JSON.stringify(obj || {}))
+  let cur = clone
+  for (let i = 0; i < keys.length - 1; i++) { if (!cur[keys[i]]) cur[keys[i]] = {}; cur = cur[keys[i]] }
+  cur[keys[keys.length - 1]] = value
+  return clone
+}
 
 const inputStyle = {
   background:'var(--surface2)', border:'1px solid var(--border)',
@@ -76,7 +99,7 @@ function SyncWizard({ client, onSaved }) {
     setStep('gerando'); setErro('')
     try {
       const html = await gerarRelatorioHTML(numeros)
-      await api.clients.reports.save(client._id, { mes: mes.trim(), html })
+      await api.clients.reports.save(client._id, { mes: mes.trim(), html, numeros })
       setStep('salvo')
       onSaved()
     } catch(e) {
@@ -224,37 +247,32 @@ function SyncWizard({ client, onSaved }) {
               </div>
             )}
 
-            {/* STEP: extraido — preview de métricas */}
+            {/* STEP: extraido — revisão editável dos dados */}
             {step === 'extraido' && numeros && (
               <div>
-                <div style={{ fontSize:12, fontWeight:600, color:'#3EBD7C', marginBottom:12 }}>
-                  ✓ Dados extraídos · {arquivos.length} arquivo{arquivos.length !== 1 ? 's' : ''}
-                  {manuais.filter(m => m.metrica).length > 0 && ` + ${manuais.filter(m => m.metrica).length} lançamento${manuais.filter(m => m.metrica).length !== 1 ? 's' : ''} manual`}
+                <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14, flexWrap:'wrap' }}>
+                  <div style={{ fontSize:12, fontWeight:600, color:'#3EBD7C' }}>✓ Dados extraídos — revise e corrija antes de gerar</div>
+                  <div style={{ fontSize:11, color:'var(--muted)' }}>
+                    {arquivos.length} arquivo{arquivos.length !== 1 ? 's' : ''}
+                    {manuais.filter(m => m.metrica).length > 0 && ` + ${manuais.filter(m => m.metrica).length} manual`}
+                  </div>
                 </div>
-                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(140px, 1fr))', gap:8, marginBottom:16 }}>
-                  {[
-                    { label:'Faturamento', v: numeros.financeiro?.entrada },
-                    { label:'Despesas',    v: numeros.financeiro?.saida },
-                    { label:'Comissões',   v: numeros.financeiro?.comissao_total },
-                    { label:'Lucro Real',  v: numeros.financeiro?.lucro_real },
-                    { label:'Clientes',    v: numeros.clientes?.base_total },
-                    { label:'Novos',       v: numeros.clientes?.novos_marco },
-                    { label:'Produtos',    v: numeros.produtos?.quantidade_total_vendida },
-                    { label:'Repor',       v: numeros.estoque?.repor?.length ?? 0 },
-                  ].filter(({ v }) => v !== undefined).map(({ label, v }) => (
-                    <div key={label} style={{ background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'10px 12px' }}>
-                      <div style={{ fontSize:10, color:'var(--muted)', textTransform:'uppercase', letterSpacing:.5, marginBottom:4 }}>{label}</div>
-                      <div style={{ fontSize:15, fontWeight:700 }}>
-                        {typeof v === 'number' && !['Clientes','Novos','Produtos','Repor'].includes(label)
-                          ? `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits:2 })}`
-                          : v}
-                      </div>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:8, marginBottom:16 }}>
+                  {REVIEW_CAMPOS.map(campo => (
+                    <div key={campo.path} style={{ background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'10px 12px' }}>
+                      <div style={{ fontSize:10, color:'var(--muted)', textTransform:'uppercase', letterSpacing:.5, marginBottom:6 }}>{campo.label}</div>
+                      <input
+                        type={campo.tipo === 'texto' ? 'text' : 'number'}
+                        value={getNumPath(numeros, campo.path)}
+                        onChange={e => setNumeros(prev => setNumPath(prev, campo.path, campo.tipo === 'texto' ? e.target.value : +e.target.value))}
+                        style={{ background:'transparent', border:'none', borderBottom:`1px solid ${motorColor}55`, outline:'none', width:'100%', fontSize:15, fontWeight:700, color:'var(--text)', padding:'2px 0' }}
+                      />
                     </div>
                   ))}
                 </div>
                 <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
                   <button onClick={gerar} style={{ background:'var(--gradient)', border:'none', borderRadius:'var(--radius)', padding:'8px 18px', color:'#fff', cursor:'pointer', fontSize:13, fontWeight:500 }}>
-                    Gerar relatório HTML →
+                    Gerar relatório →
                   </button>
                   <button onClick={reset} style={{ background:'none', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'8px 14px', color:'var(--muted)', cursor:'pointer', fontSize:12 }}>
                     Recomeçar
@@ -288,13 +306,136 @@ function SyncWizard({ client, onSaved }) {
   )
 }
 
+const CAMPOS = [
+  { secao:'Financeiro', path:'financeiro.entrada',                label:'Faturamento Bruto', tipo:'moeda'  },
+  { secao:'Financeiro', path:'financeiro.saida',                  label:'Despesas / Saída',  tipo:'moeda'  },
+  { secao:'Financeiro', path:'financeiro.comissao_total',         label:'Comissões Pagas',   tipo:'moeda'  },
+  { secao:'Financeiro', path:'financeiro.lucro_real',             label:'Lucro Real',        tipo:'moeda'  },
+  { secao:'Clientes',   path:'clientes.base_total',               label:'Retorno de Clientes', tipo:'numero' },
+  { secao:'Clientes',   path:'clientes.novos_marco',              label:'Novos Clientes',    tipo:'numero' },
+  { secao:'Produtos',   path:'produtos.quantidade_total_vendida', label:'Itens Vendidos',    tipo:'numero' },
+  { secao:'Meta',       path:'meta.mes_analisado',                label:'Mês analisado',     tipo:'texto'  },
+]
+const getPath = (obj, path) => path.split('.').reduce((o, k) => o?.[k] ?? '', obj)
+const setPath = (obj, path, value) => {
+  const keys  = path.split('.')
+  const clone = JSON.parse(JSON.stringify(obj || {}))
+  let cur = clone
+  for (let i = 0; i < keys.length - 1; i++) { if (!cur[keys[i]]) cur[keys[i]] = {}; cur = cur[keys[i]] }
+  cur[keys[keys.length - 1]] = value
+  return clone
+}
+
+function EditReportModal({ clientId, report, onClose, onSaved }) {
+  const [numeros,     setNumeros]     = useState(report.numeros     || {})
+  const [observacoes, setObservacoes] = useState(report.observacoes || '')
+  const [previewHtml, setPreviewHtml] = useState(report.html        || '')
+  const [previewing,  setPreviewing]  = useState(false)
+  const [saving,      setSaving]      = useState(false)
+  const [erro,        setErro]        = useState('')
+
+  const secoes = [...new Set(CAMPOS.map(c => c.secao))]
+  const upd    = (path, val) => setNumeros(prev => setPath(prev, path, val))
+
+  const doPreview = async () => {
+    setPreviewing(true); setErro('')
+    try { setPreviewHtml(await gerarRelatorioHTML(numeros)) }
+    catch (e) { setErro(e.message) }
+    setPreviewing(false)
+  }
+
+  const doSave = async () => {
+    setSaving(true); setErro('')
+    try {
+      const html = previewHtml || await gerarRelatorioHTML(numeros)
+      await api.clients.reports.update(clientId, report._id, { html, numeros, observacoes })
+      onSaved(); onClose()
+    } catch (e) { setErro(e.message) }
+    setSaving(false)
+  }
+
+  const inputS = { background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'7px 10px', color:'var(--text)', fontSize:13, width:'100%' }
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.65)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:12 }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', width:'100%', maxWidth:980, maxHeight:'92vh', display:'flex', flexDirection:'column' }}>
+
+        {/* Header do modal */}
+        <div style={{ display:'flex', alignItems:'center', gap:12, padding:'14px 20px', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
+          <div style={{ flex:1 }}>
+            <div style={{ fontSize:14, fontWeight:700 }}>Editar relatório · {report.mes}</div>
+            <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>Ajuste os dados e clique em Salvar para regenerar o HTML via IA.</div>
+          </div>
+          <button onClick={onClose} style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:22, lineHeight:1, padding:'0 4px' }}>×</button>
+        </div>
+
+        {/* Corpo: campos | preview */}
+        <div style={{ display:'flex', flex:1, overflow:'hidden' }}>
+
+          {/* Painel esquerdo — campos editáveis */}
+          <div style={{ width:320, flexShrink:0, padding:'16px 20px', overflowY:'auto', borderRight:'1px solid var(--border)', display:'flex', flexDirection:'column', gap:0 }}>
+            {secoes.map(secao => (
+              <div key={secao} style={{ marginBottom:18 }}>
+                <div style={{ fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:1, marginBottom:10 }}>{secao}</div>
+                {CAMPOS.filter(c => c.secao === secao).map(campo => (
+                  <div key={campo.path} style={{ marginBottom:8 }}>
+                    <div style={{ fontSize:11, color:'var(--muted)', marginBottom:3 }}>{campo.label}</div>
+                    <input
+                      type={campo.tipo === 'texto' ? 'text' : 'number'}
+                      value={getPath(numeros, campo.path)}
+                      onChange={e => upd(campo.path, campo.tipo === 'texto' ? e.target.value : +e.target.value)}
+                      style={inputS}
+                    />
+                  </div>
+                ))}
+              </div>
+            ))}
+
+            <div style={{ marginBottom:16 }}>
+              <div style={{ fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:1, marginBottom:10 }}>Observações</div>
+              <textarea value={observacoes} onChange={e => setObservacoes(e.target.value)}
+                placeholder="Notas internas sobre este relatório..."
+                rows={4} style={{ ...inputS, resize:'vertical' }} />
+            </div>
+
+            {erro && <div style={{ fontSize:12, color:'var(--red)', padding:'8px 10px', background:'rgba(248,81,73,.1)', borderRadius:'var(--radius)', marginBottom:12 }}>{erro}</div>}
+
+            <div style={{ display:'flex', gap:8, marginTop:'auto', paddingTop:8 }}>
+              <button onClick={doPreview} disabled={previewing} style={{ flex:1, background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'8px 10px', color:'var(--muted)', cursor: previewing ? 'not-allowed' : 'pointer', fontSize:12 }}>
+                {previewing ? 'Gerando...' : '▶ Preview'}
+              </button>
+              <button onClick={doSave} disabled={saving} style={{ flex:1, background:'var(--gradient)', border:'none', borderRadius:'var(--radius)', padding:'8px 10px', color:'#fff', cursor: saving ? 'not-allowed' : 'pointer', fontSize:12, fontWeight:500 }}>
+                {saving ? 'Salvando...' : 'Salvar'}
+              </button>
+            </div>
+          </div>
+
+          {/* Painel direito — iframe de preview */}
+          <div style={{ flex:1, display:'flex', flexDirection:'column', background:'#fff', overflow:'hidden' }}>
+            {previewHtml ? (
+              <iframe srcDoc={previewHtml} style={{ flex:1, border:'none', width:'100%' }} title="preview" />
+            ) : (
+              <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:'#999', fontSize:13, flexDirection:'column', gap:8 }}>
+                <span style={{ fontSize:32 }}>▶</span>
+                Clique em Preview para ver o relatório atualizado
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ReportsPanel({ client, onBack }) {
   const [reports, setReports]   = useState([])
   const [showAdd, setShowAdd]   = useState(false)
   const [mes, setMes]           = useState('')
   const [html, setHtml]         = useState('')
   const [loading, setLoading]   = useState(false)
-  const [viewing, setViewing]   = useState(null)
+  const [viewing,   setViewing]  = useState(null)
+  const [editModal, setEditModal] = useState(null)
 
   const load = () => api.clients.reports.list(client._id).then(setReports)
   useEffect(() => { load() }, [client._id])
@@ -331,7 +472,18 @@ function ReportsPanel({ client, onBack }) {
     load()
   }
 
+  const updateStatus = async (r, status) => {
+    await api.clients.reports.status(client._id, r._id, status)
+    load()
+  }
+
+  const openEdit = async (r) => {
+    const full = await api.clients.reports.get(client._id, r._id)
+    setEditModal({ ...r, numeros: full.numeros || {}, observacoes: full.observacoes || '', html: full.html || '' })
+  }
+
   return (
+    <>
     <div>
       {/* Header */}
       <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:20, flexWrap:'wrap' }}>
@@ -420,30 +572,60 @@ function ReportsPanel({ client, onBack }) {
             <div style={{ flex:1, height:1, background:'var(--border)' }} />
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(200px, 1fr))', gap:10 }}>
-            {reports.map(r => (
-              <div key={r._id} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'14px 16px' }}>
-                <div style={{ fontSize:14, fontWeight:700, marginBottom:6 }}>{r.mes}</div>
-                <div style={{ fontSize:11, color:'var(--muted)', marginBottom:12 }}>
-                  {new Date(r.createdAt).toLocaleDateString('pt-BR')}
+            {reports.map(r => {
+              const rStatus = r.status || 'gerado'
+              const rNext   = RPT_STATUS_NEXT[rStatus]
+              return (
+                <div key={r._id} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'14px 16px' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:4 }}>
+                    <div style={{ fontSize:14, fontWeight:700 }}>{r.mes}</div>
+                    <span style={{
+                      fontSize:9, padding:'2px 7px', borderRadius:4, fontWeight:600, flexShrink:0,
+                      background: RPT_STATUS_COLOR[rStatus] + '22',
+                      color: RPT_STATUS_COLOR[rStatus],
+                      border:`1px solid ${RPT_STATUS_COLOR[rStatus]}44`
+                    }}>{RPT_STATUS_LABEL[rStatus]}</span>
+                  </div>
+                  <div style={{ fontSize:11, color:'var(--muted)', marginBottom:12 }}>
+                    {new Date(r.createdAt).toLocaleDateString('pt-BR')}
+                    {r.enviado_em && <span style={{ marginLeft:8 }}>· Enviado {new Date(r.enviado_em).toLocaleDateString('pt-BR')}</span>}
+                  </div>
+                  <div style={{ display:'flex', gap:6 }}>
+                    <button onClick={() => viewReport(r)} style={{
+                      flex:1, background:'var(--gradient)', border:'none', borderRadius:'var(--radius)',
+                      padding:'6px 10px', color:'#fff', cursor:'pointer', fontSize:11, fontWeight:500
+                    }}>
+                      Visualizar
+                    </button>
+                    <button onClick={() => openEdit(r)} title="Editar HTML" style={{ background:'none', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 8px', color:'var(--muted)', cursor:'pointer', fontSize:12 }}>✎</button>
+                    {rNext && (
+                      <button onClick={() => updateStatus(r, rNext)} title={`Marcar como ${rNext}`} style={{
+                        background:'var(--surface2)', border:`1px solid ${RPT_STATUS_COLOR[rNext]}55`,
+                        borderRadius:'var(--radius)', padding:'6px 10px',
+                        color: RPT_STATUS_COLOR[rNext], cursor:'pointer', fontSize:11, fontWeight:500, whiteSpace:'nowrap'
+                      }}>→ {RPT_STATUS_LABEL[rNext]}</button>
+                    )}
+                    <button onClick={() => del(r)} style={{
+                      background:'none', border:'1px solid var(--border)', borderRadius:'var(--radius)',
+                      padding:'6px 8px', color:'var(--muted)', cursor:'pointer', fontSize:12
+                    }}>×</button>
+                  </div>
                 </div>
-                <div style={{ display:'flex', gap:6 }}>
-                  <button onClick={() => viewReport(r)} style={{
-                    flex:1, background:'var(--gradient)', border:'none', borderRadius:'var(--radius)',
-                    padding:'6px 10px', color:'#fff', cursor:'pointer', fontSize:11, fontWeight:500
-                  }}>
-                    Visualizar
-                  </button>
-                  <button onClick={() => del(r)} style={{
-                    background:'none', border:'1px solid var(--border)', borderRadius:'var(--radius)',
-                    padding:'6px 8px', color:'var(--muted)', cursor:'pointer', fontSize:12
-                  }}>×</button>
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
     </div>
+    {editModal && (
+      <EditReportModal
+        clientId={client._id}
+        report={editModal}
+        onClose={() => setEditModal(null)}
+        onSaved={() => { load(); setEditModal(null) }}
+      />
+    )}
+    </>
   )
 }
 
@@ -466,7 +648,7 @@ export default function Clientes() {
   }
 
   const edit = (c) => {
-    setForm({ empresa:c.empresa, cnpj:c.cnpj, telefone:c.telefone, motor:c.motor, ativo:c.ativo })
+    setForm({ empresa:c.empresa, cnpj:c.cnpj, telefone:c.telefone, motor:c.motor, ativo:c.ativo, treinado:c.treinado||false, envia_planilha:c.envia_planilha||false })
     setEditing(c._id); setShowForm(true)
   }
 
@@ -528,10 +710,20 @@ export default function Clientes() {
               <input placeholder="(81) 99999-9999" value={form.telefone} onChange={e => setForm(f => ({ ...f, telefone:e.target.value }))} style={inputStyle} />
             </div>
           </div>
-          <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:12, color:'var(--muted)', marginBottom:12, cursor:'pointer' }}>
-            <input type="checkbox" checked={form.ativo} onChange={e => setForm(f => ({ ...f, ativo:e.target.checked }))} style={{ accentColor:'var(--primary)' }} />
-            Cliente ativo
-          </label>
+          <div style={{ display:'flex', gap:20, flexWrap:'wrap', marginBottom:12 }}>
+            <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:12, color:'var(--muted)', cursor:'pointer' }}>
+              <input type="checkbox" checked={form.ativo} onChange={e => setForm(f => ({ ...f, ativo:e.target.checked }))} style={{ accentColor:'var(--primary)' }} />
+              Ativo
+            </label>
+            <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:12, color:'var(--muted)', cursor:'pointer' }}>
+              <input type="checkbox" checked={form.treinado||false} onChange={e => setForm(f => ({ ...f, treinado:e.target.checked }))} style={{ accentColor:'var(--primary)' }} />
+              Treinado
+            </label>
+            <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:12, color:'var(--muted)', cursor:'pointer' }}>
+              <input type="checkbox" checked={form.envia_planilha||false} onChange={e => setForm(f => ({ ...f, envia_planilha:e.target.checked }))} style={{ accentColor:'var(--primary)' }} />
+              Envia planilha
+            </label>
+          </div>
           <div style={{ display:'flex', gap:8 }}>
             <button onClick={save} style={{ background:'var(--gradient)', border:'none', borderRadius:'var(--radius)', padding:'7px 16px', color:'#fff', cursor:'pointer', fontSize:13, fontWeight:500 }}>
               {editing ? 'Salvar edição' : 'Cadastrar'}
@@ -581,7 +773,14 @@ export default function Clientes() {
                         <MotorBadge motor={c.motor} />
                       </div>
                       {c.cnpj && <div style={{ fontSize:11, color:'var(--muted)', marginBottom:2 }}>{c.cnpj}</div>}
-                      {c.telefone && <div style={{ fontSize:11, color:'var(--muted)', marginBottom:8 }}>{c.telefone}</div>}
+                      {c.telefone && <div style={{ fontSize:11, color:'var(--muted)', marginBottom:4 }}>{c.telefone}</div>}
+                      {(c.treinado || c.envia_planilha || c.ultima_sincronizacao) && (
+                        <div style={{ display:'flex', gap:4, flexWrap:'wrap', marginBottom:8, marginTop:4 }}>
+                          {c.treinado       && <span style={{ fontSize:9, padding:'1px 6px', borderRadius:3, background:'#3EBD7C22', color:'#3EBD7C', border:'1px solid #3EBD7C44' }}>Treinado</span>}
+                          {c.envia_planilha && <span style={{ fontSize:9, padding:'1px 6px', borderRadius:3, background:'#58A6FF22', color:'#58A6FF', border:'1px solid #58A6FF44' }}>Envia planilha</span>}
+                          {c.ultima_sincronizacao && <span style={{ fontSize:9, padding:'1px 6px', borderRadius:3, background:'var(--surface2)', color:'var(--muted)', border:'1px solid var(--border)' }}>Sync {new Date(c.ultima_sincronizacao).toLocaleDateString('pt-BR')}</span>}
+                        </div>
+                      )}
                       <div style={{ display:'flex', gap:6, marginTop:10 }}>
                         <button onClick={() => setSelected(c)} style={{
                           flex:1, background:'var(--gradient)', border:'none', borderRadius:'var(--radius)',

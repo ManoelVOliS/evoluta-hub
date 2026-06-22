@@ -6,7 +6,10 @@ module.exports = (req, res, next) => {
   try {
     req.user = jwt.verify(token, process.env.JWT_SECRET || 'dev_secret')
     next()
-  } catch {
+  } catch (e) {
+    if (e.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'Sessão expirada', expired: true })
+    }
     res.status(401).json({ error: 'Token inválido' })
   }
 }

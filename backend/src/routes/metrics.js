@@ -1,6 +1,6 @@
 const router = require('express').Router()
 const auth = require('../middleware/auth')
-const { Metrics } = require('../models')
+const { Metrics, MetricsHistory } = require('../models')
 
 router.use(auth)
 
@@ -10,15 +10,22 @@ router.get('/', async (req, res) => {
   res.json(m)
 })
 
+router.get('/history', async (req, res) => {
+  const history = await MetricsHistory.find().sort({ registeredAt: -1 }).limit(12)
+  res.json(history)
+})
+
 router.put('/', async (req, res) => {
   let m = await Metrics.findOne()
   if (!m) m = new Metrics()
-  const { clients, mrr, pricePerClient } = req.body
+  const { clients, mrr, pricePerClient, planStartDate } = req.body
   if (clients !== undefined)        m.clients        = clients
   if (mrr !== undefined)            m.mrr            = mrr
   if (pricePerClient !== undefined) m.pricePerClient = pricePerClient
+  if (planStartDate  !== undefined) m.planStartDate  = planStartDate || null
   m.updatedAt = new Date()
   await m.save()
+  await MetricsHistory.create({ clients: m.clients, mrr: m.mrr, pricePerClient: m.pricePerClient })
   res.json(m)
 })
 

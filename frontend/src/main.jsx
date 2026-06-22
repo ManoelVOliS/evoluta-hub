@@ -9,6 +9,9 @@ import Plan90 from './pages/Plan90'
 import TRL from './pages/TRL'
 import Content from './pages/Content'
 import Clientes from './pages/Clientes'
+import Prospects from './pages/Prospects'
+import Calendar from './pages/Calendar'
+import Relatorios from './pages/Relatorios'
 
 const Protected = ({ children }) => {
   return localStorage.getItem('token') ? children : <Navigate to="/login" />
@@ -25,6 +28,9 @@ createRoot(document.getElementById('root')).render(
         <Route path="trl" element={<TRL />} />
         <Route path="content" element={<Content />} />
         <Route path="clientes" element={<Clientes />} />
+        <Route path="prospects" element={<Prospects />} />
+        <Route path="calendar" element={<Calendar />} />
+        <Route path="relatorios" element={<Relatorios />} />
       </Route>
     </Routes>
   </BrowserRouter>

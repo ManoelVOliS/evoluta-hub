@@ -24,12 +24,42 @@ const Badge = ({ tag }) => (
 )
 
 export default function Plan90() {
-  const [items, setItems] = useState([])
-  const [form, setForm]   = useState(EMPTY)
-  const [show, setShow]   = useState(false)
+  const [items,         setItems]         = useState([])
+  const [form,          setForm]          = useState(EMPTY)
+  const [show,          setShow]          = useState(false)
+  const [planStartDate, setPlanStartDate] = useState('')
+  const [editingDate,   setEditingDate]   = useState(false)
 
   const load = () => api.plan.list().then(setItems)
-  useEffect(() => { load() }, [])
+  useEffect(() => {
+    load()
+    api.metrics.get().then(m => {
+      if (m.planStartDate) setPlanStartDate(new Date(m.planStartDate).toISOString().substring(0, 10))
+    }).catch(() => {})
+  }, [])
+
+  const savePlanDate = async (date) => {
+    await api.metrics.update({ planStartDate: date || null })
+    setPlanStartDate(date)
+    setEditingDate(false)
+  }
+
+  const weekLabel = (w) => {
+    if (!planStartDate) return WEEK_LABEL[w]
+    const start = new Date(planStartDate)
+    start.setDate(start.getDate() + (w - 1) * 7)
+    const end = new Date(start)
+    end.setDate(end.getDate() + 6)
+    const fmt = d => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+    return `Semana ${w} · ${fmt(start)} – ${fmt(end)}`
+  }
+
+  const planTitle = () => {
+    if (!planStartDate) return 'Plano 30 dias'
+    const d = new Date(planStartDate)
+    const s = d.toLocaleString('pt-BR', { month: 'long', year: 'numeric' })
+    return `Plano — ${s.charAt(0).toUpperCase()}${s.slice(1)}`
+  }
 
   const done  = items.filter(i => i.done).length
   const total = items.length
@@ -56,12 +86,24 @@ export default function Plan90() {
       <div style={{ marginBottom:20 }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:8 }}>
           <div>
-            <h1 style={{ fontSize:18, fontWeight:700, marginBottom:2 }}>Checklist — Julho 2026</h1>
+            <h1 style={{ fontSize:18, fontWeight:700, marginBottom:2 }}>{planTitle()}</h1>
             <p style={{ fontSize:12, color:'var(--muted)' }}>30 dias · operação solo · sem metas heroicas</p>
           </div>
-          <span style={{ fontSize:12, color:'var(--muted)', whiteSpace:'nowrap', paddingTop:4 }}>
-            {done} de {total} feitos
-          </span>
+          <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+            {editingDate ? (
+              <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+                <input type="date" defaultValue={planStartDate}
+                  onChange={e => savePlanDate(e.target.value)}
+                  style={{ background:'var(--surface2)', border:'1px solid var(--primary)', borderRadius:'var(--radius)', padding:'4px 8px', color:'var(--text)', fontSize:12 }} />
+                <button onClick={() => setEditingDate(false)} style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:12 }}>✕</button>
+              </div>
+            ) : (
+              <button onClick={() => setEditingDate(true)} style={{ background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'4px 10px', color:'var(--muted)', cursor:'pointer', fontSize:11 }}>
+                {planStartDate ? `Início: ${new Date(planStartDate).toLocaleDateString('pt-BR')} ✎` : '+ Definir data de início'}
+              </button>
+            )}
+            <span style={{ fontSize:12, color:'var(--muted)', whiteSpace:'nowrap' }}>{done} de {total} feitos</span>
+          </div>
         </div>
 
         {/* Progress bar */}
@@ -128,7 +170,7 @@ export default function Plan90() {
             {/* Week header */}
             <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12 }}>
               <span style={{ fontSize:11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:1, whiteSpace:'nowrap' }}>
-                {WEEK_LABEL[w]}
+                {weekLabel(w)}
               </span>
               <div style={{ flex:1, height:1, background:'var(--border)' }} />
             </div>

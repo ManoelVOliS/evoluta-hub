@@ -5,6 +5,11 @@ import { api } from '../api'
 export default function Login() {
   const [pw, setPw] = useState('')
   const [err, setErr] = useState('')
+  const [info, setInfo] = useState(() => {
+    const m = sessionStorage.getItem('auth_msg')
+    if (m) sessionStorage.removeItem('auth_msg')
+    return m || ''
+  })
   const nav = useNavigate()
 
   const submit = async (e) => {
@@ -16,12 +21,17 @@ export default function Login() {
   }
 
   return (
-    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'100vh', background:'var(--bg)', padding:'16px' }}>
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'100vh', background:'var(--bg)', padding:'16px', flex:1 }}>
       <div style={{ width:'100%', maxWidth:380, background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'32px 24px' }}>
         <div style={{ background:'var(--gradient)', backgroundClip:'text', WebkitBackgroundClip:'text', color:'transparent', fontSize:24, fontWeight:700, marginBottom:8, letterSpacing:-0.5 }}>
           eVOLUTA Hub
         </div>
         <div style={{ fontSize:14, color:'var(--muted)', marginBottom:28 }}>Painel de operação interna</div>
+        {info && (
+          <div style={{ fontSize:12, color:'var(--accent)', marginBottom:16, padding:'8px 10px', background:'rgba(245,130,22,.1)', borderRadius:'var(--radius)', border:'1px solid rgba(245,130,22,.25)' }}>
+            {info}
+          </div>
+        )}
         <form onSubmit={submit}>
           <input
             type="password"

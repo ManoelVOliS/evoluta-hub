@@ -47,7 +47,10 @@ const S = {
 
 const links = [
   { to:'/', label:'Dashboard', icon:'◉' },
-  { to:'/clientes', label:'Clientes', icon:'◐' },
+  { to:'/clientes',  label:'Clientes',   icon:'◐' },
+  { to:'/prospects', label:'Prospects',  icon:'◑' },
+  { to:'/calendar',   label:'Calendário',  icon:'◻' },
+  { to:'/relatorios', label:'Relatórios',  icon:'◪' },
   { to:'/backlog', label:'Backlog', icon:'◈' },
   { to:'/plan', label:'Plano 30 dias', icon:'◷' },
   { to:'/trl', label:'Análise TRL', icon:'◎' },

@@ -11,7 +11,13 @@ const req = async (method, path, body) => {
     headers: headers(),
     body: body ? JSON.stringify(body) : undefined
   })
-  if (res.status === 401) { localStorage.removeItem('token'); window.location.href = '/login'; return }
+  if (res.status === 401) {
+    const body = await res.json().catch(() => ({}))
+    if (body.expired) sessionStorage.setItem('auth_msg', 'Sua sessão expirou. Faça login novamente.')
+    localStorage.removeItem('token')
+    window.location.href = '/login'
+    return
+  }
   return res.json()
 }
 
@@ -41,19 +47,35 @@ export const api = {
     delete: (f) => req('DELETE', `/content/${f}`),
   },
   metrics: {
-    get:    () => req('GET', '/metrics'),
-    update: (d) => req('PUT', '/metrics', d),
+    get:     () => req('GET', '/metrics'),
+    update:  (d) => req('PUT', '/metrics', d),
+    history: () => req('GET', '/metrics/history'),
   },
   clients: {
-    list:   ()        => req('GET', '/clients'),
+    list:          ()        => req('GET', '/clients'),
+    reportsSummary:()        => req('GET', '/clients/reports-summary'),
     create: (d)       => req('POST', '/clients', d),
     update: (id, d)   => req('PUT', `/clients/${id}`, d),
     delete: (id)      => req('DELETE', `/clients/${id}`),
     reports: {
-      list:   (cid)        => req('GET', `/clients/${cid}/reports`),
-      get:    (cid, rid)   => req('GET', `/clients/${cid}/reports/${rid}`),
-      save:   (cid, d)     => req('POST', `/clients/${cid}/reports`, d),
-      delete: (cid, rid)   => req('DELETE', `/clients/${cid}/reports/${rid}`),
+      list:   (cid)           => req('GET', `/clients/${cid}/reports`),
+      get:    (cid, rid)      => req('GET', `/clients/${cid}/reports/${rid}`),
+      save:   (cid, d)        => req('POST', `/clients/${cid}/reports`, d),
+      update: (cid, rid, body) => req('PUT',   `/clients/${cid}/reports/${rid}`, typeof body === 'string' ? { html: body } : body),
+      status: (cid, rid, s)   => req('PATCH', `/clients/${cid}/reports/${rid}/status`, { status: s }),
+      delete: (cid, rid)      => req('DELETE', `/clients/${cid}/reports/${rid}`),
     }
-  }
+  },
+  prospects: {
+    list:   ()       => req('GET', '/prospects'),
+    create: (d)      => req('POST', '/prospects', d),
+    update: (id, d)  => req('PUT', `/prospects/${id}`, d),
+    delete: (id)     => req('DELETE', `/prospects/${id}`),
+  },
+  calendar: {
+    list:   (year, month) => req('GET', `/calendar?year=${year}&month=${month}`),
+    create: (d)           => req('POST', '/calendar', d),
+    update: (id, d)       => req('PUT', `/calendar/${id}`, d),
+    delete: (id)          => req('DELETE', `/calendar/${id}`),
+  },
 }

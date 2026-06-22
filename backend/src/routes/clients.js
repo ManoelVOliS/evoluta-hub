@@ -4,6 +4,25 @@ const { Client, Report } = require('../models')
 
 router.use(auth)
 
+/* ── Resumo geral de relatórios ── */
+
+router.get('/reports-summary', async (req, res) => {
+  const [clients, reports] = await Promise.all([
+    Client.find().sort({ empresa: 1 }),
+    Report.find({}, { html: 0, numeros: 0, observacoes: 0 }).sort({ mes: -1 })
+  ])
+  const byClient = {}
+  reports.forEach(r => {
+    const key = r.clientId.toString()
+    if (!byClient[key]) byClient[key] = []
+    byClient[key].push(r)
+  })
+  res.json(clients.map(c => ({
+    _id: c._id, empresa: c.empresa, ativo: c.ativo, motor: c.motor,
+    reports: byClient[c._id.toString()] || []
+  })))
+})
+
 /* ── Clientes ── */
 
 router.get('/', async (req, res) => {
@@ -35,13 +54,18 @@ router.get('/:id/reports', async (req, res) => {
 })
 
 router.post('/:id/reports', async (req, res) => {
-  const { mes, html } = req.body
+  const { mes, html, numeros } = req.body
   if (!mes || !html) return res.status(400).json({ error: 'mes e html são obrigatórios' })
   const existing = await Report.findOne({ clientId: req.params.id, mes })
   if (existing) {
-    existing.html = html; await existing.save(); return res.json(existing)
+    existing.html = html
+    if (numeros !== undefined) existing.numeros = numeros
+    await existing.save()
+    await Client.findByIdAndUpdate(req.params.id, { ultima_sincronizacao: new Date() })
+    return res.json(existing)
   }
-  const report = await Report.create({ clientId: req.params.id, mes, html })
+  const report = await Report.create({ clientId: req.params.id, mes, html, numeros: numeros || null })
+  await Client.findByIdAndUpdate(req.params.id, { ultima_sincronizacao: new Date() })
   res.status(201).json(report)
 })
 
@@ -51,13 +75,30 @@ router.get('/:id/reports/:rid', async (req, res) => {
   res.json(report)
 })
 
+router.patch('/:id/reports/:rid/status', async (req, res) => {
+  const { status } = req.body
+  if (!['gerado','revisado','enviado'].includes(status)) {
+    return res.status(400).json({ error: 'Status inválido' })
+  }
+  const update = { status }
+  if (status === 'enviado') update.enviado_em = new Date()
+  const report = await Report.findByIdAndUpdate(req.params.rid, update, { new: true })
+  res.json(report)
+})
+
+router.put('/:id/reports/:rid', async (req, res) => {
+  const { html, numeros, observacoes } = req.body
+  if (!html) return res.status(400).json({ error: 'html é obrigatório' })
+  const update = { html }
+  if (numeros     !== undefined) update.numeros     = numeros
+  if (observacoes !== undefined) update.observacoes = observacoes
+  const report = await Report.findByIdAndUpdate(req.params.rid, update, { new: true })
+  res.json(report)
+})
+
 router.delete('/:id/reports/:rid', async (req, res) => {
   await Report.findByIdAndDelete(req.params.rid)
   res.json({ ok: true })
 })
-
-/* ── Slot de integração com motores (futuro) ── */
-// POST /api/clients/:id/sync  →  busca dados do motor e gera relatório
-// router.post('/:id/sync', async (req, res) => { ... })
 
 module.exports = router
