@@ -1,11 +1,34 @@
 require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
+const helmet = require('helmet')
 const path = require('path')
 const mongoose = require('mongoose')
 
+if (!process.env.JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET não definido. Defina no .env antes de iniciar.')
+  process.exit(1)
+}
+
 const app = express()
-app.use(cors())
+
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "blob:"],
+    }
+  }
+}))
+
+const allowedOrigin = process.env.ALLOWED_ORIGIN || 'http://localhost:5173'
+app.use(cors({
+  origin: [allowedOrigin, 'http://localhost:5173', 'http://localhost:3000'],
+  credentials: true
+}))
+
 app.use(express.json({ limit: '50mb' }))
 
 mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/evoluta_hub')

@@ -3,14 +3,33 @@ services:
     build: .
     container_name: evoluta-hub
     restart: unless-stopped
-    ports:
-      - "3000:3000"
+    networks:
+      - evoluta-net
     environment:
       - NODE_ENV=production
-      - MONGO_URI=${MONGO_URI}
-      - JWT_SECRET=${JWT_SECRET}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
-    volumes:
-      - ./content:/app/content
     env_file:
       - .env
+    volumes:
+      - ./content:/app/content
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: evoluta-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - evoluta-net
+    depends_on:
+      app:
+        condition: service_healthy
+
+networks:
+  evoluta-net:
+    driver: bridge
