@@ -42,6 +42,8 @@ const ClientSchema = new mongoose.Schema({
 const ReportSchema = new mongoose.Schema({
   clientId:   { type: mongoose.Schema.Types.ObjectId, ref: 'Client', required: true },
   mes:        { type: String, required: true },
+  tipo:       { type: String, enum: ['mensal', 'quinzenal'], default: 'mensal' },
+  periodo:    { type: String, default: null }, // null para mensal; 'Q1' ou 'Q2' para quinzenal
   html:       { type: String, required: true },
   status:      { type: String, enum: ['gerado','revisado','enviado'], default: 'gerado' },
   enviado_em:  { type: Date },
@@ -86,14 +88,29 @@ const CalEventSchema = new mongoose.Schema({
   createdAt:  { type: Date, default: Date.now }
 })
 
+const ServiceCategorySchema = new mongoose.Schema({
+  nome_original: { type: String, required: true, unique: true },
+  categoria:     { type: String, required: true },
+  criado_em:     { type: Date, default: Date.now }
+})
+
+const BenchmarkPageSchema = new mongoose.Schema({
+  mes:            { type: String, required: true, unique: true },
+  html:           { type: String, required: true },
+  gerado_em:      { type: Date, default: Date.now },
+  total_clientes: { type: Number, default: 0 }
+})
+
 module.exports = {
-  Backlog:        mongoose.model('Backlog', BacklogSchema),
-  Plan:           mongoose.model('Plan', PlanSchema),
-  TRL:            mongoose.model('TRL', TRLSchema),
-  Metrics:        mongoose.model('Metrics', MetricsSchema),
-  MetricsHistory: mongoose.model('MetricsHistory', MetricsHistorySchema),
-  Client:         mongoose.model('Client', ClientSchema),
-  Report:         mongoose.model('Report', ReportSchema),
-  Prospect:       mongoose.model('Prospect', ProspectSchema),
-  CalEvent:       mongoose.model('CalEvent', CalEventSchema),
+  Backlog:          mongoose.model('Backlog', BacklogSchema),
+  Plan:             mongoose.model('Plan', PlanSchema),
+  TRL:              mongoose.model('TRL', TRLSchema),
+  Metrics:          mongoose.model('Metrics', MetricsSchema),
+  MetricsHistory:   mongoose.model('MetricsHistory', MetricsHistorySchema),
+  Client:           mongoose.model('Client', ClientSchema),
+  Report:           mongoose.model('Report', ReportSchema),
+  Prospect:         mongoose.model('Prospect', ProspectSchema),
+  CalEvent:         mongoose.model('CalEvent', CalEventSchema),
+  ServiceCategory:  mongoose.model('ServiceCategory', ServiceCategorySchema),
+  BenchmarkPage:    mongoose.model('BenchmarkPage', BenchmarkPageSchema),
 }

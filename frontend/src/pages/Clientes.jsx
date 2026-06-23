@@ -9,6 +9,10 @@ const RPT_STATUS_COLOR = { gerado:'#8B949E', revisado:'#58A6FF', enviado:'#3EBD7
 const RPT_STATUS_NEXT  = { gerado:'revisado', revisado:'enviado', enviado:null }
 const RPT_STATUS_LABEL = { gerado:'Gerado', revisado:'Revisado', enviado:'Enviado' }
 
+const TIPO_COLOR   = { mensal:'#7B2CBF', quinzenal:'#F58216' }
+const TIPO_LABEL   = { mensal:'Mensal', quinzenal:'Quinzenal' }
+const PERIODO_LABEL = { Q1:'1ª quinzena', Q2:'2ª quinzena' }
+
 const EMPTY_CLIENT = { empresa:'', cnpj:'', telefone:'', motor:'CashBarber', ativo:true, treinado:false, envia_planilha:false }
 
 const REVIEW_CAMPOS = [
@@ -36,6 +40,15 @@ const inputStyle = {
   color:'var(--text)', fontSize:13, width:'100%'
 }
 
+/* ── helpers ── */
+const mesToDate = (mes) => {
+  const [m, y] = mes.split('/')
+  return new Date(`${y}-${m}-01`)
+}
+const sortReportsByMes = (reports) =>
+  [...reports].sort((a, b) => mesToDate(a.mes) - mesToDate(b.mes))
+
+/* ── badges ── */
 const MotorBadge = ({ motor }) => (
   <span style={{
     fontSize:10, padding:'2px 8px', borderRadius:4, fontWeight:600,
@@ -45,18 +58,207 @@ const MotorBadge = ({ motor }) => (
   }}>{motor}</span>
 )
 
-// Etapas: idle → extraindo → extraido → gerando → salvo | erro
+const TipoBadge = ({ tipo, periodo }) => {
+  const col = TIPO_COLOR[tipo] || '#8B949E'
+  const label = tipo === 'quinzenal' && periodo ? PERIODO_LABEL[periodo] : TIPO_LABEL[tipo] || tipo
+  return (
+    <span style={{
+      fontSize:9, padding:'2px 7px', borderRadius:4, fontWeight:600, flexShrink:0,
+      background: col + '22', color: col, border: `1px solid ${col}44`
+    }}>{label}</span>
+  )
+}
+
+/* ── seletor Mensal / Quinzenal ── */
+function TipoSelector({ tipo, quinzena, onTipo, onQuinzena }) {
+  return (
+    <div style={{ marginBottom:14 }}>
+      <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:1, marginBottom:8 }}>
+        Período do relatório
+      </div>
+      <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+        {['mensal','quinzenal'].map(t => (
+          <button key={t} onClick={() => onTipo(t)} style={{
+            padding:'5px 14px', borderRadius:'var(--radius)', fontSize:12, fontWeight:600, cursor:'pointer',
+            background: tipo === t ? TIPO_COLOR[t] + '22' : 'var(--surface2)',
+            color: tipo === t ? TIPO_COLOR[t] : 'var(--muted)',
+            border: `1px solid ${tipo === t ? TIPO_COLOR[t] + '66' : 'var(--border)'}`
+          }}>{TIPO_LABEL[t]}</button>
+        ))}
+        {tipo === 'quinzenal' && ['Q1','Q2'].map(q => (
+          <button key={q} onClick={() => onQuinzena(q)} style={{
+            padding:'5px 14px', borderRadius:'var(--radius)', fontSize:12, fontWeight:600, cursor:'pointer',
+            background: quinzena === q ? '#F5821622' : 'var(--surface2)',
+            color: quinzena === q ? '#F58216' : 'var(--muted)',
+            border: `1px solid ${quinzena === q ? '#F5821666' : 'var(--border)'}`
+          }}>{PERIODO_LABEL[q]}</button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/* ── gráfico SVG de barras ── */
+function MiniBarChart({ pontos, color }) {
+  if (!pontos.length) return null
+  const vals = pontos.map(p => p.valor ?? 0)
+  const max  = Math.max(...vals, 1)
+  const H = 56, GAP = 3
+  const barW = Math.max(8, Math.floor((280 - GAP * pontos.length) / pontos.length) - GAP)
+  const W    = (barW + GAP) * pontos.length
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H + 20}`} style={{ width:'100%', height:'auto', overflow:'visible' }}>
+      {pontos.map((p, i) => {
+        const x = i * (barW + GAP)
+        const semDados = p.valor == null
+        const h = semDados ? 3 : Math.max(2, (p.valor / max) * H)
+        const y = H - h
+        const label = p.mes.slice(0, 2) + '/' + p.mes.slice(-2)
+        return (
+          <g key={i}>
+            <rect x={x} y={y} width={barW} height={h}
+              fill={semDados ? '#1A2342' : color} rx={2} opacity={semDados ? 0.5 : 0.9} />
+            <text x={x + barW / 2} y={H + 14} textAnchor="middle" fontSize={7} fill="#475569">{label}</text>
+          </g>
+        )
+      })}
+    </svg>
+  )
+}
+
+const EVOLUCAO_METRICAS = [
+  { label:'Faturamento',    path:'financeiro.entrada',                fmt: v => `R$ ${Number(v).toLocaleString('pt-BR')}`, color:'#7B2CBF' },
+  { label:'Lucro Real',     path:'financeiro.lucro_real',            fmt: v => `R$ ${Number(v).toLocaleString('pt-BR')}`, color:'#3EBD7C' },
+  { label:'Novos Clientes', path:'clientes.novos_marco',             fmt: v => `${v}`,                                    color:'#58A6FF' },
+  { label:'Retorno',        path:'clientes.base_total',              fmt: v => `${v}`,                                    color:'#F58216' },
+]
+
+function EvolucaoTab({ reports, tipoFiltro, onTipoFiltro }) {
+  const filtered = sortReportsByMes(reports.filter(r => (r.tipo || 'mensal') === tipoFiltro))
+
+  if (filtered.length === 0) {
+    return (
+      <div style={{ textAlign:'center', padding:'40px 16px', color:'var(--muted)', fontSize:13 }}>
+        Nenhum relatório {TIPO_LABEL[tipoFiltro].toLowerCase()} ainda.<br />
+        <span style={{ fontSize:11, opacity:.7 }}>Gere relatórios com o SyncWizard para ver a evolução.</span>
+      </div>
+    )
+  }
+
+  const semNumeros = filtered.every(r => !r.numeros)
+
+  return (
+    <div>
+      <div style={{ display:'flex', gap:6, marginBottom:20 }}>
+        {['mensal','quinzenal'].map(t => (
+          <button key={t} onClick={() => onTipoFiltro(t)} style={{
+            padding:'4px 14px', borderRadius:'var(--radius)', fontSize:12, fontWeight:600, cursor:'pointer',
+            background: tipoFiltro === t ? TIPO_COLOR[t] + '22' : 'var(--surface2)',
+            color: tipoFiltro === t ? TIPO_COLOR[t] : 'var(--muted)',
+            border: `1px solid ${tipoFiltro === t ? TIPO_COLOR[t] + '66' : 'var(--border)'}`
+          }}>{TIPO_LABEL[t]}</button>
+        ))}
+        <span style={{ fontSize:11, color:'var(--muted)', alignSelf:'center', marginLeft:4 }}>
+          {filtered.length} período{filtered.length !== 1 ? 's' : ''}
+        </span>
+      </div>
+
+      {semNumeros && (
+        <div style={{ padding:'10px 14px', background:'rgba(245,130,22,.08)', border:'1px solid rgba(245,130,22,.2)', borderRadius:'var(--radius)', fontSize:12, color:'#F58216', marginBottom:20 }}>
+          Os relatórios existentes não têm dados estruturados. Gere novos relatórios via SyncWizard para popular os gráficos.
+        </div>
+      )}
+
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(260px, 1fr))', gap:16 }}>
+        {EVOLUCAO_METRICAS.map(m => {
+          const pontos = filtered.map(r => ({
+            mes: r.mes,
+            valor: r.numeros ? (getNumPath(r.numeros, m.path) || null) : null,
+            periodo: r.periodo
+          }))
+          const comDados  = pontos.filter(p => p.valor != null)
+          const ultimo    = comDados.at(-1)
+          const penultimo = comDados.at(-2)
+          const delta     = ultimo && penultimo
+            ? ((ultimo.valor - penultimo.valor) / penultimo.valor) * 100
+            : null
+
+          return (
+            <div key={m.path} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'16px 16px 12px', borderTop:`3px solid ${m.color}` }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:10 }}>
+                <span style={{ fontSize:11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:.5 }}>{m.label}</span>
+                {delta != null && (
+                  <span style={{ fontSize:11, fontWeight:700, color: delta >= 0 ? '#3EBD7C' : '#f87171' }}>
+                    {delta >= 0 ? '▲' : '▼'} {Math.abs(delta).toFixed(1)}%
+                  </span>
+                )}
+              </div>
+              {ultimo ? (
+                <div style={{ fontSize:18, fontWeight:800, color: m.color, marginBottom:12 }}>{m.fmt(ultimo.valor)}</div>
+              ) : (
+                <div style={{ fontSize:13, color:'var(--muted)', marginBottom:12 }}>Sem dados</div>
+              )}
+              <MiniBarChart pontos={pontos} color={m.color} />
+            </div>
+          )
+        })}
+      </div>
+
+      {/* tabela de resumo */}
+      <div style={{ marginTop:24, overflowX:'auto' }}>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign:'left', padding:'8px 10px', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:.5, borderBottom:'1px solid var(--border)' }}>Mês</th>
+              {EVOLUCAO_METRICAS.map(m => (
+                <th key={m.path} style={{ textAlign:'right', padding:'8px 10px', fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:.5, borderBottom:'1px solid var(--border)', whiteSpace:'nowrap' }}>
+                  {m.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {[...filtered].reverse().map(r => (
+              <tr key={r._id}>
+                <td style={{ padding:'8px 10px', borderBottom:'1px solid var(--border)', color:'var(--text)', fontWeight:600 }}>
+                  {r.mes}
+                  {r.periodo && <span style={{ marginLeft:6, fontSize:10, color:'#F58216' }}>{PERIODO_LABEL[r.periodo]}</span>}
+                </td>
+                {EVOLUCAO_METRICAS.map(m => {
+                  const val = r.numeros ? getNumPath(r.numeros, m.path) : null
+                  return (
+                    <td key={m.path} style={{ padding:'8px 10px', borderBottom:'1px solid var(--border)', textAlign:'right', color: val ? m.color : 'var(--muted)', fontWeight: val ? 600 : 400 }}>
+                      {val != null && val !== '' ? m.fmt(val) : '—'}
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+/* ── SyncWizard ── */
 function SyncWizard({ client, onSaved }) {
   const [open,     setOpen]    = useState(false)
   const [step,     setStep]    = useState('idle')
   const [arquivos, setArquivos] = useState([])
   const [mes,      setMes]     = useState('')
-  const [manuais,  setManuais] = useState([])  // [{metrica, valor}]
+  const [tipo,     setTipo]    = useState('mensal')
+  const [quinzena, setQuinzena] = useState('Q1')
+  const [manuais,  setManuais] = useState([])
   const [numeros,  setNumeros] = useState(null)
   const [erro,     setErro]    = useState('')
   const dropRef = useRef()
 
-  const reset = () => { setStep('idle'); setArquivos([]); setMes(''); setManuais([]); setNumeros(null); setErro('') }
+  const reset = () => {
+    setStep('idle'); setArquivos([]); setMes(''); setTipo('mensal'); setQuinzena('Q1')
+    setManuais([]); setNumeros(null); setErro('')
+  }
   const close = () => { setOpen(false); reset() }
 
   const addArquivos = (files) => {
@@ -65,7 +267,6 @@ function SyncWizard({ client, onSaved }) {
     setArquivos(prev => {
       const nomes = new Set(prev.map(f => f.name))
       const merged = [...prev, ...novos.filter(f => !nomes.has(f.name))]
-      // tenta detectar mês pelo primeiro arquivo que tiver
       if (!mes) {
         for (const f of merged) {
           const m = f.name.match(/(\d{2}[-_]?\d{4}|\d{4}[-_]?\d{2})/)
@@ -77,10 +278,9 @@ function SyncWizard({ client, onSaved }) {
   }
 
   const removeArquivo = (nome) => setArquivos(prev => prev.filter(f => f.name !== nome))
-
-  const addManual = () => setManuais(prev => [...prev, { metrica: '', valor: '' }])
+  const addManual    = ()       => setManuais(prev => [...prev, { metrica: '', valor: '' }])
   const updateManual = (i, field, val) => setManuais(prev => prev.map((m, idx) => idx === i ? { ...m, [field]: val } : m))
-  const removeManual = (i) => setManuais(prev => prev.filter((_, idx) => idx !== i))
+  const removeManual = (i)      => setManuais(prev => prev.filter((_, idx) => idx !== i))
 
   const extrair = async () => {
     if (!arquivos.length || !mes.trim()) return
@@ -98,8 +298,9 @@ function SyncWizard({ client, onSaved }) {
   const gerar = async () => {
     setStep('gerando'); setErro('')
     try {
-      const html = await gerarRelatorioHTML(numeros)
-      await api.clients.reports.save(client._id, { mes: mes.trim(), html, numeros })
+      const periodo = tipo === 'quinzenal' ? quinzena : null
+      const html    = await gerarRelatorioHTML(numeros)
+      await api.clients.reports.save(client._id, { mes: mes.trim(), html, numeros, tipo, periodo })
       setStep('salvo')
       onSaved()
     } catch(e) {
@@ -107,7 +308,7 @@ function SyncWizard({ client, onSaved }) {
     }
   }
 
-  const motorColor = MOTOR_COLOR[client.motor] || '#8B949E'
+  const motorColor  = MOTOR_COLOR[client.motor] || '#8B949E'
   const podeExtrair = arquivos.length > 0 && mes.trim()
 
   return (
@@ -139,10 +340,9 @@ function SyncWizard({ client, onSaved }) {
         {open && (
           <div style={{ marginTop:16 }}>
 
-            {/* STEP: idle/erro — dropzone + manuais + mês */}
             {(step === 'idle' || step === 'erro') && (
               <div>
-                {/* Dropzone múltiplos arquivos */}
+                {/* Dropzone */}
                 <div
                   ref={dropRef}
                   onDragOver={e => { e.preventDefault(); dropRef.current.style.borderColor = motorColor }}
@@ -160,7 +360,6 @@ function SyncWizard({ client, onSaved }) {
                   <div style={{ fontSize:11, color:'var(--muted)', marginTop:4, opacity:.7 }}>.xlsx · .xls · .csv · múltiplos arquivos aceitos</div>
                 </div>
 
-                {/* Lista de arquivos adicionados */}
                 {arquivos.length > 0 && (
                   <div style={{ marginBottom:12, display:'flex', flexDirection:'column', gap:4 }}>
                     {arquivos.map(f => (
@@ -174,6 +373,9 @@ function SyncWizard({ client, onSaved }) {
                   </div>
                 )}
 
+                {/* Tipo de período */}
+                <TipoSelector tipo={tipo} quinzena={quinzena} onTipo={setTipo} onQuinzena={setQuinzena} />
+
                 {/* Lançamentos manuais */}
                 <div style={{ marginBottom:14 }}>
                   <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
@@ -183,36 +385,18 @@ function SyncWizard({ client, onSaved }) {
                       background:'none', border:`1px solid ${motorColor}55`,
                       borderRadius:'var(--radius)', padding:'3px 10px',
                       color: motorColor, cursor:'pointer', fontSize:11, fontWeight:600, flexShrink:0
-                    }}>
-                      + Adicionar linha
-                    </button>
+                    }}>+ Adicionar linha</button>
                   </div>
-
                   {manuais.length === 0 && (
                     <div style={{ fontSize:11, color:'var(--muted)', opacity:.6, paddingLeft:2 }}>
                       Dados que não constam na planilha. Ex: valores manuais de comissão, ajustes, etc.
                     </div>
                   )}
-
                   {manuais.map((m, i) => (
                     <div key={i} style={{ display:'grid', gridTemplateColumns:'1fr 140px auto', gap:6, marginBottom:6 }}>
-                      <input
-                        placeholder="Métrica (ex: Comissão extra)"
-                        value={m.metrica}
-                        onChange={e => updateManual(i, 'metrica', e.target.value)}
-                        style={inputStyle}
-                      />
-                      <input
-                        placeholder="Valor"
-                        value={m.valor}
-                        onChange={e => updateManual(i, 'valor', e.target.value)}
-                        style={inputStyle}
-                      />
-                      <button onClick={() => removeManual(i)} style={{
-                        background:'none', border:'1px solid var(--border)',
-                        borderRadius:'var(--radius)', padding:'0 10px',
-                        color:'var(--muted)', cursor:'pointer', fontSize:14
-                      }}>×</button>
+                      <input placeholder="Métrica (ex: Comissão extra)" value={m.metrica} onChange={e => updateManual(i, 'metrica', e.target.value)} style={inputStyle} />
+                      <input placeholder="Valor" value={m.valor} onChange={e => updateManual(i, 'valor', e.target.value)} style={inputStyle} />
+                      <button onClick={() => removeManual(i)} style={{ background:'none', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'0 10px', color:'var(--muted)', cursor:'pointer', fontSize:14 }}>×</button>
                     </div>
                   ))}
                 </div>
@@ -240,14 +424,12 @@ function SyncWizard({ client, onSaved }) {
               </div>
             )}
 
-            {/* STEP: extraindo */}
             {step === 'extraindo' && (
               <div style={{ textAlign:'center', padding:'24px 0', color:'var(--muted)', fontSize:13 }}>
                 Lendo {arquivos.length} arquivo{arquivos.length !== 1 ? 's' : ''} e enviando para análise...
               </div>
             )}
 
-            {/* STEP: extraido — revisão editável dos dados */}
             {step === 'extraido' && numeros && (
               <div>
                 <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14, flexWrap:'wrap' }}>
@@ -255,6 +437,7 @@ function SyncWizard({ client, onSaved }) {
                   <div style={{ fontSize:11, color:'var(--muted)' }}>
                     {arquivos.length} arquivo{arquivos.length !== 1 ? 's' : ''}
                     {manuais.filter(m => m.metrica).length > 0 && ` + ${manuais.filter(m => m.metrica).length} manual`}
+                    {' · '}{TIPO_LABEL[tipo]}{tipo === 'quinzenal' && quinzena ? ` · ${PERIODO_LABEL[quinzena]}` : ''}
                   </div>
                 </div>
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:8, marginBottom:16 }}>
@@ -281,17 +464,17 @@ function SyncWizard({ client, onSaved }) {
               </div>
             )}
 
-            {/* STEP: gerando */}
             {step === 'gerando' && (
               <div style={{ textAlign:'center', padding:'24px 0', color:'var(--muted)', fontSize:13 }}>
                 Gerando relatório via IA...
               </div>
             )}
 
-            {/* STEP: salvo */}
             {step === 'salvo' && (
               <div style={{ textAlign:'center', padding:'24px 0' }}>
-                <div style={{ fontSize:16, fontWeight:700, color:'#3EBD7C', marginBottom:8 }}>✓ Relatório {mes} salvo!</div>
+                <div style={{ fontSize:16, fontWeight:700, color:'#3EBD7C', marginBottom:8 }}>
+                  ✓ Relatório {mes} ({TIPO_LABEL[tipo]}{tipo === 'quinzenal' && quinzena ? ` · ${PERIODO_LABEL[quinzena]}` : ''}) salvo!
+                </div>
                 <div style={{ fontSize:12, color:'var(--muted)', marginBottom:16 }}>Aparece na lista de relatórios abaixo.</div>
                 <button onClick={close} style={{ background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'7px 16px', color:'var(--text)', cursor:'pointer', fontSize:12 }}>
                   Fechar
@@ -306,15 +489,16 @@ function SyncWizard({ client, onSaved }) {
   )
 }
 
+/* ── Modal editar relatório ── */
 const CAMPOS = [
-  { secao:'Financeiro', path:'financeiro.entrada',                label:'Faturamento Bruto', tipo:'moeda'  },
-  { secao:'Financeiro', path:'financeiro.saida',                  label:'Despesas / Saída',  tipo:'moeda'  },
-  { secao:'Financeiro', path:'financeiro.comissao_total',         label:'Comissões Pagas',   tipo:'moeda'  },
-  { secao:'Financeiro', path:'financeiro.lucro_real',             label:'Lucro Real',        tipo:'moeda'  },
+  { secao:'Financeiro', path:'financeiro.entrada',                label:'Faturamento Bruto',   tipo:'moeda'  },
+  { secao:'Financeiro', path:'financeiro.saida',                  label:'Despesas / Saída',    tipo:'moeda'  },
+  { secao:'Financeiro', path:'financeiro.comissao_total',         label:'Comissões Pagas',     tipo:'moeda'  },
+  { secao:'Financeiro', path:'financeiro.lucro_real',             label:'Lucro Real',          tipo:'moeda'  },
   { secao:'Clientes',   path:'clientes.base_total',               label:'Retorno de Clientes', tipo:'numero' },
-  { secao:'Clientes',   path:'clientes.novos_marco',              label:'Novos Clientes',    tipo:'numero' },
-  { secao:'Produtos',   path:'produtos.quantidade_total_vendida', label:'Itens Vendidos',    tipo:'numero' },
-  { secao:'Meta',       path:'meta.mes_analisado',                label:'Mês analisado',     tipo:'texto'  },
+  { secao:'Clientes',   path:'clientes.novos_marco',              label:'Novos Clientes',      tipo:'numero' },
+  { secao:'Produtos',   path:'produtos.quantidade_total_vendida', label:'Itens Vendidos',      tipo:'numero' },
+  { secao:'Meta',       path:'meta.mes_analisado',                label:'Mês analisado',       tipo:'texto'  },
 ]
 const getPath = (obj, path) => path.split('.').reduce((o, k) => o?.[k] ?? '', obj)
 const setPath = (obj, path, value) => {
@@ -361,7 +545,6 @@ function EditReportModal({ clientId, report, onClose, onSaved }) {
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', width:'100%', maxWidth:980, maxHeight:'92vh', display:'flex', flexDirection:'column' }}>
 
-        {/* Header do modal */}
         <div style={{ display:'flex', alignItems:'center', gap:12, padding:'14px 20px', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
           <div style={{ flex:1 }}>
             <div style={{ fontSize:14, fontWeight:700 }}>Editar relatório · {report.mes}</div>
@@ -370,10 +553,7 @@ function EditReportModal({ clientId, report, onClose, onSaved }) {
           <button onClick={onClose} style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:22, lineHeight:1, padding:'0 4px' }}>×</button>
         </div>
 
-        {/* Corpo: campos | preview */}
         <div style={{ display:'flex', flex:1, overflow:'hidden' }}>
-
-          {/* Painel esquerdo — campos editáveis */}
           <div style={{ width:320, flexShrink:0, padding:'16px 20px', overflowY:'auto', borderRight:'1px solid var(--border)', display:'flex', flexDirection:'column', gap:0 }}>
             {secoes.map(secao => (
               <div key={secao} style={{ marginBottom:18 }}>
@@ -411,7 +591,6 @@ function EditReportModal({ clientId, report, onClose, onSaved }) {
             </div>
           </div>
 
-          {/* Painel direito — iframe de preview */}
           <div style={{ flex:1, display:'flex', flexDirection:'column', background:'#fff', overflow:'hidden' }}>
             {previewHtml ? (
               <iframe srcDoc={previewHtml} style={{ flex:1, border:'none', width:'100%' }} title="preview" />
@@ -428,14 +607,18 @@ function EditReportModal({ clientId, report, onClose, onSaved }) {
   )
 }
 
+/* ── ReportsPanel ── */
 function ReportsPanel({ client, onBack }) {
-  const [reports, setReports]   = useState([])
-  const [showAdd, setShowAdd]   = useState(false)
-  const [mes, setMes]           = useState('')
-  const [html, setHtml]         = useState('')
-  const [loading, setLoading]   = useState(false)
-  const [viewing,   setViewing]  = useState(null)
-  const [editModal, setEditModal] = useState(null)
+  const [reports,  setReports]  = useState([])
+  const [showAdd,  setShowAdd]  = useState(false)
+  const [mes,      setMes]      = useState('')
+  const [html,     setHtml]     = useState('')
+  const [tipoAdd,  setTipoAdd]  = useState('mensal')
+  const [quinzAdd, setQuinzAdd] = useState('Q1')
+  const [loading,  setLoading]  = useState(false)
+  const [editModal,setEditModal]= useState(null)
+  const [activeTab,setActiveTab]= useState('relatorios')
+  const [tipoEvol, setTipoEvol] = useState('mensal')
 
   const load = () => api.clients.reports.list(client._id).then(setReports)
   useEffect(() => { load() }, [client._id])
@@ -455,8 +638,9 @@ function ReportsPanel({ client, onBack }) {
   const save = async () => {
     if (!mes.trim() || !html.trim()) return
     setLoading(true)
-    await api.clients.reports.save(client._id, { mes: mes.trim(), html })
-    setMes(''); setHtml(''); setShowAdd(false); load()
+    const periodo = tipoAdd === 'quinzenal' ? quinzAdd : null
+    await api.clients.reports.save(client._id, { mes: mes.trim(), html, tipo: tipoAdd, periodo })
+    setMes(''); setHtml(''); setTipoAdd('mensal'); setQuinzAdd('Q1'); setShowAdd(false); load()
     setLoading(false)
   }
 
@@ -482,11 +666,16 @@ function ReportsPanel({ client, onBack }) {
     setEditModal({ ...r, numeros: full.numeros || {}, observacoes: full.observacoes || '', html: full.html || '' })
   }
 
+  const TABS = [
+    { id:'relatorios', label:`Relatórios (${reports.length})` },
+    { id:'evolucao',   label:'Evolução' },
+  ]
+
   return (
     <>
     <div>
       {/* Header */}
-      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:20, flexWrap:'wrap' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:16, flexWrap:'wrap' }}>
         <button onClick={onBack} style={{ background:'none', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'5px 12px', color:'var(--muted)', cursor:'pointer', fontSize:12 }}>
           ← Voltar
         </button>
@@ -500,123 +689,156 @@ function ReportsPanel({ client, onBack }) {
             {client.cnpj && <span style={{ fontSize:11, color:'var(--muted)' }}>{client.cnpj}</span>}
           </div>
         </div>
-        <button onClick={() => setShowAdd(s => !s)} style={{
-          background:'var(--gradient)', border:'none', borderRadius:'var(--radius)',
-          padding:'7px 14px', color:'#fff', cursor:'pointer', fontSize:12, fontWeight:500
-        }}>
-          + Relatório
-        </button>
+        {activeTab === 'relatorios' && (
+          <button onClick={() => setShowAdd(s => !s)} style={{
+            background:'var(--gradient)', border:'none', borderRadius:'var(--radius)',
+            padding:'7px 14px', color:'#fff', cursor:'pointer', fontSize:12, fontWeight:500
+          }}>
+            + Relatório
+          </button>
+        )}
       </div>
 
-      <SyncWizard client={client} onSaved={() => load()} />
+      {/* Tabs */}
+      <div style={{ display:'flex', gap:2, marginBottom:20, borderBottom:'1px solid var(--border)' }}>
+        {TABS.map(tab => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
+            background:'none', border:'none', padding:'8px 16px', cursor:'pointer',
+            fontSize:13, fontWeight:600,
+            color: activeTab === tab.id ? 'var(--primary)' : 'var(--muted)',
+            borderBottom: activeTab === tab.id ? '2px solid var(--primary)' : '2px solid transparent',
+            transition:'all .15s'
+          }}>
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-      {/* Form upload */}
-      {showAdd && (
-        <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:16, marginBottom:20 }}>
-          <div style={{ fontSize:12, fontWeight:600, color:'var(--primary)', marginBottom:12 }}>Adicionar relatório</div>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:10 }}>
-            <div>
-              <div style={{ fontSize:11, color:'var(--muted)', marginBottom:4 }}>Mês de referência</div>
-              <input placeholder="ex: 06/2026" value={mes} onChange={e => setMes(e.target.value)} style={inputStyle} />
+      {/* ── Tab: Relatórios ── */}
+      {activeTab === 'relatorios' && (
+        <div>
+          <SyncWizard client={client} onSaved={() => load()} />
+
+          {showAdd && (
+            <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:16, marginBottom:20 }}>
+              <div style={{ fontSize:12, fontWeight:600, color:'var(--primary)', marginBottom:12 }}>Adicionar relatório</div>
+              <TipoSelector tipo={tipoAdd} quinzena={quinzAdd} onTipo={setTipoAdd} onQuinzena={setQuinzAdd} />
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:10 }}>
+                <div>
+                  <div style={{ fontSize:11, color:'var(--muted)', marginBottom:4 }}>Mês de referência</div>
+                  <input placeholder="ex: 06/2026" value={mes} onChange={e => setMes(e.target.value)} style={inputStyle} />
+                </div>
+                <div>
+                  <div style={{ fontSize:11, color:'var(--muted)', marginBottom:4 }}>Arquivo .html</div>
+                  <label style={{ ...inputStyle, display:'block', cursor:'pointer', padding:'7px 10px' }}>
+                    {html ? '✓ Arquivo carregado' : 'Escolher arquivo .html'}
+                    <input type="file" accept=".html,.htm" onChange={handleFile} style={{ display:'none' }} />
+                  </label>
+                </div>
+              </div>
+              {!html && (
+                <textarea
+                  placeholder="Ou cole o HTML do relatório aqui..."
+                  value={html}
+                  onChange={e => setHtml(e.target.value)}
+                  rows={4}
+                  style={{ ...inputStyle, resize:'vertical', marginBottom:10 }}
+                />
+              )}
+              {html && (
+                <div style={{ fontSize:11, color:'var(--muted)', marginBottom:10, padding:'6px 10px', background:'var(--surface2)', borderRadius:'var(--radius)' }}>
+                  {(html.length / 1024).toFixed(1)} KB carregados
+                  <button onClick={() => setHtml('')} style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:11, marginLeft:8 }}>remover</button>
+                </div>
+              )}
+              <div style={{ display:'flex', gap:8 }}>
+                <button onClick={save} disabled={!mes || !html || loading} style={{
+                  background: mes && html ? 'var(--gradient)' : 'var(--border)',
+                  border:'none', borderRadius:'var(--radius)', padding:'7px 16px',
+                  color:'#fff', cursor: mes && html ? 'pointer' : 'not-allowed', fontSize:13, fontWeight:500
+                }}>
+                  {loading ? 'Salvando...' : 'Salvar relatório'}
+                </button>
+                <button onClick={() => { setShowAdd(false); setMes(''); setHtml(''); setTipoAdd('mensal'); setQuinzAdd('Q1') }} style={{ background:'none', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'7px 14px', color:'var(--muted)', cursor:'pointer', fontSize:13 }}>
+                  Cancelar
+                </button>
+              </div>
             </div>
-            <div>
-              <div style={{ fontSize:11, color:'var(--muted)', marginBottom:4 }}>Arquivo .html</div>
-              <label style={{ ...inputStyle, display:'block', cursor:'pointer', padding:'7px 10px' }}>
-                {html ? '✓ Arquivo carregado' : 'Escolher arquivo .html'}
-                <input type="file" accept=".html,.htm" onChange={handleFile} style={{ display:'none' }} />
-              </label>
-            </div>
-          </div>
-          {!html && (
-            <textarea
-              placeholder="Ou cole o HTML do relatório aqui..."
-              value={html}
-              onChange={e => setHtml(e.target.value)}
-              rows={4}
-              style={{ ...inputStyle, resize:'vertical', marginBottom:10 }}
-            />
           )}
-          {html && (
-            <div style={{ fontSize:11, color:'var(--muted)', marginBottom:10, padding:'6px 10px', background:'var(--surface2)', borderRadius:'var(--radius)' }}>
-              {(html.length / 1024).toFixed(1)} KB carregados
-              <button onClick={() => setHtml('')} style={{ background:'none', border:'none', color:'var(--red)', cursor:'pointer', fontSize:11, marginLeft:8 }}>remover</button>
+
+          {reports.length === 0 ? (
+            <div style={{ textAlign:'center', padding:'40px 16px', color:'var(--muted)', fontSize:13 }}>
+              Nenhum relatório ainda.<br />
+              <span style={{ fontSize:11, opacity:.7 }}>Adicione o primeiro relatório com o botão acima.</span>
+            </div>
+          ) : (
+            <div>
+              <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14 }}>
+                <span style={{ fontSize:11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:1 }}>
+                  {reports.length} relatório{reports.length !== 1 ? 's' : ''}
+                </span>
+                <div style={{ flex:1, height:1, background:'var(--border)' }} />
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(200px, 1fr))', gap:10 }}>
+                {reports.map(r => {
+                  const rStatus = r.status || 'gerado'
+                  const rNext   = RPT_STATUS_NEXT[rStatus]
+                  const rTipo   = r.tipo || 'mensal'
+                  return (
+                    <div key={r._id} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'14px 16px', borderTop:`2px solid ${TIPO_COLOR[rTipo] || 'var(--border)'}` }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:4, gap:4 }}>
+                        <div style={{ fontSize:14, fontWeight:700 }}>{r.mes}</div>
+                        <TipoBadge tipo={rTipo} periodo={r.periodo} />
+                      </div>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+                        <span style={{ fontSize:11, color:'var(--muted)' }}>{new Date(r.createdAt).toLocaleDateString('pt-BR')}</span>
+                        <span style={{
+                          fontSize:9, padding:'2px 7px', borderRadius:4, fontWeight:600,
+                          background: RPT_STATUS_COLOR[rStatus] + '22',
+                          color: RPT_STATUS_COLOR[rStatus],
+                          border:`1px solid ${RPT_STATUS_COLOR[rStatus]}44`
+                        }}>{RPT_STATUS_LABEL[rStatus]}</span>
+                      </div>
+                      {r.enviado_em && (
+                        <div style={{ fontSize:10, color:'var(--muted)', marginBottom:8 }}>
+                          Enviado {new Date(r.enviado_em).toLocaleDateString('pt-BR')}
+                        </div>
+                      )}
+                      <div style={{ display:'flex', gap:6 }}>
+                        <button onClick={() => viewReport(r)} style={{
+                          flex:1, background:'var(--gradient)', border:'none', borderRadius:'var(--radius)',
+                          padding:'6px 10px', color:'#fff', cursor:'pointer', fontSize:11, fontWeight:500
+                        }}>
+                          Visualizar
+                        </button>
+                        <button onClick={() => openEdit(r)} title="Editar" style={{ background:'none', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 8px', color:'var(--muted)', cursor:'pointer', fontSize:12 }}>✎</button>
+                        {rNext && (
+                          <button onClick={() => updateStatus(r, rNext)} title={`Marcar como ${rNext}`} style={{
+                            background:'var(--surface2)', border:`1px solid ${RPT_STATUS_COLOR[rNext]}55`,
+                            borderRadius:'var(--radius)', padding:'6px 10px',
+                            color: RPT_STATUS_COLOR[rNext], cursor:'pointer', fontSize:11, fontWeight:500, whiteSpace:'nowrap'
+                          }}>→ {RPT_STATUS_LABEL[rNext]}</button>
+                        )}
+                        <button onClick={() => del(r)} style={{
+                          background:'none', border:'1px solid var(--border)', borderRadius:'var(--radius)',
+                          padding:'6px 8px', color:'var(--muted)', cursor:'pointer', fontSize:12
+                        }}>×</button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           )}
-          <div style={{ display:'flex', gap:8 }}>
-            <button onClick={save} disabled={!mes || !html || loading} style={{
-              background: mes && html ? 'var(--gradient)' : 'var(--border)',
-              border:'none', borderRadius:'var(--radius)', padding:'7px 16px',
-              color:'#fff', cursor: mes && html ? 'pointer' : 'not-allowed', fontSize:13, fontWeight:500
-            }}>
-              {loading ? 'Salvando...' : 'Salvar relatório'}
-            </button>
-            <button onClick={() => { setShowAdd(false); setMes(''); setHtml('') }} style={{ background:'none', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'7px 14px', color:'var(--muted)', cursor:'pointer', fontSize:13 }}>
-              Cancelar
-            </button>
-          </div>
         </div>
       )}
 
-      {/* Lista de relatórios */}
-      {reports.length === 0 ? (
-        <div style={{ textAlign:'center', padding:'40px 16px', color:'var(--muted)', fontSize:13 }}>
-          Nenhum relatório ainda.<br />
-          <span style={{ fontSize:11, opacity:.7 }}>Adicione o primeiro relatório com o botão acima.</span>
-        </div>
-      ) : (
-        <div>
-          <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14 }}>
-            <span style={{ fontSize:11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:1 }}>
-              {reports.length} relatório{reports.length !== 1 ? 's' : ''}
-            </span>
-            <div style={{ flex:1, height:1, background:'var(--border)' }} />
-          </div>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(200px, 1fr))', gap:10 }}>
-            {reports.map(r => {
-              const rStatus = r.status || 'gerado'
-              const rNext   = RPT_STATUS_NEXT[rStatus]
-              return (
-                <div key={r._id} style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'14px 16px' }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:4 }}>
-                    <div style={{ fontSize:14, fontWeight:700 }}>{r.mes}</div>
-                    <span style={{
-                      fontSize:9, padding:'2px 7px', borderRadius:4, fontWeight:600, flexShrink:0,
-                      background: RPT_STATUS_COLOR[rStatus] + '22',
-                      color: RPT_STATUS_COLOR[rStatus],
-                      border:`1px solid ${RPT_STATUS_COLOR[rStatus]}44`
-                    }}>{RPT_STATUS_LABEL[rStatus]}</span>
-                  </div>
-                  <div style={{ fontSize:11, color:'var(--muted)', marginBottom:12 }}>
-                    {new Date(r.createdAt).toLocaleDateString('pt-BR')}
-                    {r.enviado_em && <span style={{ marginLeft:8 }}>· Enviado {new Date(r.enviado_em).toLocaleDateString('pt-BR')}</span>}
-                  </div>
-                  <div style={{ display:'flex', gap:6 }}>
-                    <button onClick={() => viewReport(r)} style={{
-                      flex:1, background:'var(--gradient)', border:'none', borderRadius:'var(--radius)',
-                      padding:'6px 10px', color:'#fff', cursor:'pointer', fontSize:11, fontWeight:500
-                    }}>
-                      Visualizar
-                    </button>
-                    <button onClick={() => openEdit(r)} title="Editar HTML" style={{ background:'none', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 8px', color:'var(--muted)', cursor:'pointer', fontSize:12 }}>✎</button>
-                    {rNext && (
-                      <button onClick={() => updateStatus(r, rNext)} title={`Marcar como ${rNext}`} style={{
-                        background:'var(--surface2)', border:`1px solid ${RPT_STATUS_COLOR[rNext]}55`,
-                        borderRadius:'var(--radius)', padding:'6px 10px',
-                        color: RPT_STATUS_COLOR[rNext], cursor:'pointer', fontSize:11, fontWeight:500, whiteSpace:'nowrap'
-                      }}>→ {RPT_STATUS_LABEL[rNext]}</button>
-                    )}
-                    <button onClick={() => del(r)} style={{
-                      background:'none', border:'1px solid var(--border)', borderRadius:'var(--radius)',
-                      padding:'6px 8px', color:'var(--muted)', cursor:'pointer', fontSize:12
-                    }}>×</button>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
+      {/* ── Tab: Evolução ── */}
+      {activeTab === 'evolucao' && (
+        <EvolucaoTab reports={reports} tipoFiltro={tipoEvol} onTipoFiltro={setTipoEvol} />
       )}
     </div>
+
     {editModal && (
       <EditReportModal
         clientId={client._id}
@@ -629,13 +851,14 @@ function ReportsPanel({ client, onBack }) {
   )
 }
 
+/* ── Clientes (lista principal) ── */
 export default function Clientes() {
-  const [clients, setClients]   = useState([])
+  const [clients,  setClients]  = useState([])
   const [selected, setSelected] = useState(null)
   const [showForm, setShowForm] = useState(false)
-  const [editing, setEditing]   = useState(null)
-  const [form, setForm]         = useState(EMPTY_CLIENT)
-  const [search, setSearch]     = useState('')
+  const [editing,  setEditing]  = useState(null)
+  const [form,     setForm]     = useState(EMPTY_CLIENT)
+  const [search,   setSearch]   = useState('')
 
   const load = () => api.clients.list().then(setClients)
   useEffect(() => { load() }, [])
@@ -659,7 +882,7 @@ export default function Clientes() {
     load()
   }
 
-  const shown = clients.filter(c => c.empresa.toLowerCase().includes(search.toLowerCase()))
+  const shown    = clients.filter(c => c.empresa.toLowerCase().includes(search.toLowerCase()))
   const ativos   = shown.filter(c => c.ativo)
   const inativos = shown.filter(c => !c.ativo)
 
@@ -670,7 +893,6 @@ export default function Clientes() {
 
   return (
     <div>
-      {/* Header */}
       <div style={{ marginBottom:20, display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:8 }}>
         <div>
           <h1 style={{ fontSize:18, fontWeight:700, marginBottom:2, background:'var(--gradient)', backgroundClip:'text', WebkitBackgroundClip:'text', color:'transparent' }}>Clientes</h1>
@@ -684,7 +906,6 @@ export default function Clientes() {
         </button>
       </div>
 
-      {/* Form */}
       {showForm && (
         <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:16, marginBottom:20 }}>
           <div style={{ fontSize:12, fontWeight:600, color:'var(--primary)', marginBottom:12 }}>
@@ -735,7 +956,6 @@ export default function Clientes() {
         </div>
       )}
 
-      {/* Busca */}
       <input
         placeholder="Buscar cliente..."
         value={search}
@@ -743,14 +963,13 @@ export default function Clientes() {
         style={{ ...inputStyle, marginBottom:20, maxWidth:300 }}
       />
 
-      {/* Lista */}
       {clients.length === 0 ? (
         <div style={{ textAlign:'center', padding:'60px 16px', color:'var(--muted)', fontSize:13 }}>
           Nenhum cliente cadastrado ainda.
         </div>
       ) : (
         <>
-          {[{ label:'Ativos', list: ativos, color:'var(--primary)' }, { label:'Inativos', list: inativos, color:'var(--muted)' }]
+          {[{ label:'Ativos', list: ativos }, { label:'Inativos', list: inativos }]
             .filter(g => g.list.length > 0)
             .map(group => (
               <div key={group.label} style={{ marginBottom:28 }}>

@@ -12,6 +12,7 @@ import Clientes from './pages/Clientes'
 import Prospects from './pages/Prospects'
 import Calendar from './pages/Calendar'
 import Relatorios from './pages/Relatorios'
+import Benchmark from './pages/Benchmark'
 
 const Protected = ({ children }) => {
   return localStorage.getItem('token') ? children : <Navigate to="/login" />
@@ -31,6 +32,7 @@ createRoot(document.getElementById('root')).render(
         <Route path="prospects" element={<Prospects />} />
         <Route path="calendar" element={<Calendar />} />
         <Route path="relatorios" element={<Relatorios />} />
+        <Route path="benchmark" element={<Benchmark />} />
       </Route>
     </Routes>
   </BrowserRouter>

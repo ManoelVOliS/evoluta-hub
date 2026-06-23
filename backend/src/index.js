@@ -33,6 +33,10 @@ app.use('/api/n8n',       require('./routes/n8n'))
 app.use('/api/prospects', require('./routes/prospects'))
 app.use('/api/calendar',  require('./routes/calendar'))
 
+const { benchmarkRouter, serviceCatRouter } = require('./routes/benchmark')
+app.use('/api/benchmark',          benchmarkRouter)
+app.use('/api/service-categories', serviceCatRouter)
+
 app.use(express.static(path.join(__dirname, '../public')))
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'))

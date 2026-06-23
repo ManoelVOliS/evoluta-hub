@@ -78,4 +78,9 @@ export const api = {
     update: (id, d)       => req('PUT', `/calendar/${id}`, d),
     delete: (id)          => req('DELETE', `/calendar/${id}`),
   },
+  benchmark: {
+    list:   ()    => req('GET',  '/benchmark'),
+    get:    (mes) => req('GET',  `/benchmark/${mes}`),
+    gerar:  (mes) => req('POST', '/benchmark/gerar', { mes }),
+  },
 }

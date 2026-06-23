@@ -54,9 +54,9 @@ router.get('/:id/reports', async (req, res) => {
 })
 
 router.post('/:id/reports', async (req, res) => {
-  const { mes, html, numeros } = req.body
+  const { mes, html, numeros, tipo = 'mensal', periodo = null } = req.body
   if (!mes || !html) return res.status(400).json({ error: 'mes e html são obrigatórios' })
-  const existing = await Report.findOne({ clientId: req.params.id, mes })
+  const existing = await Report.findOne({ clientId: req.params.id, mes, tipo, periodo })
   if (existing) {
     existing.html = html
     if (numeros !== undefined) existing.numeros = numeros
@@ -64,7 +64,7 @@ router.post('/:id/reports', async (req, res) => {
     await Client.findByIdAndUpdate(req.params.id, { ultima_sincronizacao: new Date() })
     return res.json(existing)
   }
-  const report = await Report.create({ clientId: req.params.id, mes, html, numeros: numeros || null })
+  const report = await Report.create({ clientId: req.params.id, mes, html, numeros: numeros || null, tipo, periodo })
   await Client.findByIdAndUpdate(req.params.id, { ultima_sincronizacao: new Date() })
   res.status(201).json(report)
 })

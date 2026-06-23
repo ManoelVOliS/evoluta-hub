@@ -1,0 +1,288 @@
+{
+  "name": "eVOLUTA — W3 Benchmark",
+  "nodes": [
+    {
+      "id": "node-001-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "benchmark/gerar",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "evoluta-w3-benchmark"
+    },
+    {
+      "id": "node-002-mongo-snapshots",
+      "name": "MongoDB - Buscar snapshots",
+      "type": "n8n-nodes-base.mongoDb",
+      "typeVersion": 1,
+      "position": [480, 300],
+      "credentials": {
+        "mongoDb": {
+          "id": "MONGO_CREDENTIAL_ID",
+          "name": "MongoDB eVOLUTA"
+        }
+      },
+      "parameters": {
+        "operation": "find",
+        "collection": "snapshots_mensais",
+        "query": "={{ JSON.stringify({'meta.mes_analisado': $json.mes}) }}",
+        "options": {
+          "projection": "{ \"meta.unidade_slug\": 1, \"financeiro\": 1, \"clientes\": 1, \"pacotes\": 1, \"ranking_barbeiros\": 1, \"auditoria_profissionais\": 1 }"
+        }
+      }
+    },
+    {
+      "id": "node-003-mongo-categories",
+      "name": "MongoDB - Buscar service_categories",
+      "type": "n8n-nodes-base.mongoDb",
+      "typeVersion": 1,
+      "position": [720, 300],
+      "credentials": {
+        "mongoDb": {
+          "id": "MONGO_CREDENTIAL_ID",
+          "name": "MongoDB eVOLUTA"
+        }
+      },
+      "parameters": {
+        "operation": "find",
+        "collection": "service_categories",
+        "query": "{}",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-004-code-extract",
+      "name": "Code - Extrair nomes novos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// FIX: $() em vez de $node[]\nconst snapshots = $(\"MongoDB - Buscar snapshots\").all().map(i => i.json);\nconst categoriasExistentes = $input.all().map(i => i.json.nome_original);\n\nconst nomesUnicos = new Set();\n\nsnapshots.forEach(snap => {\n  (snap.auditoria_profissionais || []).forEach(prof => {\n    // Serviços\n    Object.keys(prof.servicos_valor || {}).forEach(n => nomesUnicos.add(n));\n    // Produtos\n    Object.keys(prof.produtos_valor || {}).forEach(n => nomesUnicos.add(n));\n    // Pacotes/Assinaturas por profissional (se existir)\n    Object.keys(prof.pacotes_valor || {}).forEach(n => nomesUnicos.add(n));\n  });\n  // Nomes de pacotes/assinaturas do campo pacotes.itens\n  (snap.pacotes?.itens || []).forEach(p => {\n    if (p.nome) nomesUnicos.add(p.nome);\n  });\n});\n\nconst nomesNovos = [...nomesUnicos].filter(n => !categoriasExistentes.includes(n));\n\nreturn [{ json: { nomesNovos, snapshots } }];"
+      }
+    },
+    {
+      "id": "node-005-if",
+      "name": "IF - Tem nomes novos",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1200, 300],
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.nomesNovos.length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-006a-llm-chain-normalize",
+      "name": "LLM Chain - Normalizar",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [1440, 100],
+      "parameters": {
+        "prompt": "={{ `Classifique cada nome da lista abaixo em UMA das categorias.\\n\\nCATEGORIAS PERMITIDAS:\\n- corte\\n- barba\\n- combo\\n- acabamento\\n- quimico\\n- estetica\\n- produto_capilar\\n- produto_consumivel\\n- pacote_assinatura\\n- outros\\n\\nResponda APENAS com JSON válido, sem texto antes ou depois:\\n{ \"NOME ORIGINAL\": \"categoria\" }\\n\\nLISTA:\\n${$json.nomesNovos.join('\\n')}` }}"
+      }
+    },
+    {
+      "id": "node-006b-gemini-normalize",
+      "name": "Gemini Flash - Normalizar",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [1440, 240],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "GEMINI_CREDENTIAL_ID",
+          "name": "Google Gemini API"
+        }
+      },
+      "parameters": {
+        "modelName": "gemini-1.5-flash",
+        "options": {
+          "temperature": 0.1
+        }
+      }
+    },
+    {
+      "id": "node-007-http-save-categories",
+      "name": "HTTP - Salvar categorias",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1680, 100],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3000/api/service-categories",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify(Object.entries(JSON.parse($json.text)).map(([nome_original, categoria]) => ({ nome_original, categoria }))) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-008-code-benchmark",
+      "name": "Code - Calcular benchmark",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1920, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// FIX: $() em vez de $node[]\nconst snapshots = $(\"Code - Extrair nomes novos\").first().json.snapshots;\n\n// Categorias salvas no MongoDB\nconst categorias = $(\"MongoDB - Buscar service_categories\").all()\n  .reduce((acc, i) => { acc[i.json.nome_original] = i.json.categoria; return acc; }, {});\n\n// Mescla categorias novas retornadas pelo Gemini (branch true)\ntry {\n  const chainFirst = $(\"LLM Chain - Normalizar\").first();\n  if (chainFirst) {\n    const raw = chainFirst.json.text || \"{}\";\n    Object.assign(categorias, JSON.parse(raw));\n  }\n} catch (e) {}\n\nconst metricas = snapshots.map(snap => {\n  const fat      = snap.financeiro?.faturamento_total     || 0;\n  const lucro    = snap.financeiro?.lucro_real            || 0;\n  const servicos = snap.financeiro?.faturamento_servicos  || 0;\n  const produtos = snap.financeiro?.faturamento_produtos  || 0;\n  // Pacotes: tenta campo dedicado, fallback em pacotes.receita_total\n  const pacotes  = snap.financeiro?.faturamento_pacotes\n                || snap.pacotes?.receita_total\n                || 0;\n\n  const barbeiros = snap.ranking_barbeiros || [];\n  const ticket = barbeiros.length\n    ? barbeiros.reduce((a, b) => a + (b.ticket_medio || 0), 0) / barbeiros.length\n    : 0;\n\n  const retencao = (snap.clientes?.base_total || 0) > 0\n    ? (snap.clientes.retorno_clientes || 0) / snap.clientes.base_total\n    : 0;\n\n  const tem_pacotes = (snap.pacotes?.quantidade_total_vendida || 0) > 0;\n\n  // ── por_categoria: agora cobre serviços + produtos + pacotes ──\n  const por_categoria = {};\n\n  (snap.auditoria_profissionais || []).forEach(prof => {\n    // Serviços\n    Object.entries(prof.servicos_valor || {}).forEach(([nome, valor]) => {\n      const cat = categorias[nome] || \"outros\";\n      por_categoria[cat] = (por_categoria[cat] || 0) + valor;\n    });\n    // Produtos\n    Object.entries(prof.produtos_valor || {}).forEach(([nome, valor]) => {\n      const cat = categorias[nome] || \"produto_consumivel\";\n      por_categoria[cat] = (por_categoria[cat] || 0) + valor;\n    });\n    // Pacotes/Assinaturas por profissional (se existir)\n    Object.entries(prof.pacotes_valor || {}).forEach(([nome, valor]) => {\n      const cat = categorias[nome] || \"pacote_assinatura\";\n      por_categoria[cat] = (por_categoria[cat] || 0) + valor;\n    });\n  });\n\n  // Fallback: se receita de pacotes existe mas não veio por profissional\n  if (pacotes > 0 && !por_categoria[\"pacote_assinatura\"]) {\n    por_categoria[\"pacote_assinatura\"] = pacotes;\n  }\n\n  return {\n    slug:                 snap.meta?.unidade_slug,\n    margem:               fat > 0 ? lucro / fat : 0,\n    pct_servicos:         fat > 0 ? servicos / fat : 0,\n    pct_produtos:         fat > 0 ? produtos / fat : 0,\n    pct_pacotes:          fat > 0 ? pacotes  / fat : 0,\n    faturamento_servicos: servicos,\n    faturamento_produtos: produtos,\n    faturamento_pacotes:  pacotes,\n    ticket_medio:         ticket,\n    retencao,\n    tem_pacotes,\n    por_categoria\n  };\n});\n\nconst LABELS = [\"Barbearia A\",\"Barbearia B\",\"Barbearia C\",\"Barbearia D\",\n               \"Barbearia E\",\"Barbearia F\",\"Barbearia G\",\"Barbearia H\"];\nconst shuffled = [...LABELS].sort(() => Math.random() - 0.5);\n\nconst anonimizado = metricas.map((m, i) => ({ label: shuffled[i], ...m }));\n\nconst calcMedia = (campo) => {\n  const validos = anonimizado.filter(c => c[campo] > 0);\n  if (validos.length < 3) return null;\n  return validos.reduce((a, c) => a + c[campo], 0) / validos.length;\n};\n\nconst media = {\n  margem:       calcMedia(\"margem\"),\n  ticket_medio: calcMedia(\"ticket_medio\"),\n  pct_servicos: calcMedia(\"pct_servicos\"),\n  pct_produtos: calcMedia(\"pct_produtos\"),\n  pct_pacotes:  calcMedia(\"pct_pacotes\"),\n  retencao:     calcMedia(\"retencao\")\n};\n\nconst comPacotes = anonimizado.filter(c => c.tem_pacotes).length;\n\nreturn [{ json: { anonimizado, media, total: metricas.length, comPacotes } }];"
+      }
+    },
+    {
+      "id": "node-009a-llm-chain-insight",
+      "name": "LLM Chain - Insight",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [2160, 300],
+      "parameters": {
+        "prompt": "={{ `Você é analista da eVOLUTA, plataforma de BI para barbearias.\\n\\nEscreva um parágrafo de comparativo em português, tom consultivo, máximo 120 palavras.\\nNão cite nomes de barbearias. Use apenas \"as demais barbearias da rede eVOLUTA\".\\n\\nMÉDIAS DA REDE:\\n- Margem média: ${(($json.media?.margem ?? 0) * 100).toFixed(1)}%\\n- Ticket médio: R$ ${($json.media?.ticket_medio ?? 0).toFixed(2)}\\n- % receita de serviços: ${(($json.media?.pct_servicos ?? 0) * 100).toFixed(1)}%\\n- % receita de produtos: ${(($json.media?.pct_produtos ?? 0) * 100).toFixed(1)}%\\n- % receita de pacotes/assinaturas: ${(($json.media?.pct_pacotes ?? 0) * 100).toFixed(1)}%\\n- Taxa de retorno: ${(($json.media?.retencao ?? 0) * 100).toFixed(1)}%\\n- Barbearias com pacotes ativos: ${$json.comPacotes} de ${$json.total}\\n\\nDestaque 1 ponto positivo da rede e 1 oportunidade de melhoria coletiva.\\nTermine com 1 sugestão prática.\\nRetorne apenas o texto, sem títulos ou marcações.` }}"
+      }
+    },
+    {
+      "id": "node-009b-gemini-insight",
+      "name": "Gemini Flash - Insight",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [2160, 440],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "GEMINI_CREDENTIAL_ID",
+          "name": "Google Gemini API"
+        }
+      },
+      "parameters": {
+        "modelName": "gemini-1.5-flash",
+        "options": {
+          "temperature": 0.7,
+          "maxOutputTokens": 300
+        }
+      }
+    },
+    {
+      "id": "node-010-code-html",
+      "name": "Code - Montar HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2400, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// FIX: $() em vez de $node[]\nconst { anonimizado, media, total, comPacotes } = $(\"Code - Calcular benchmark\").first().json;\nconst insight = ($json.text || \"\").trim();\nconst mes = $(\"Webhook\").first().json.mes;\n\nconst fmt  = (n, dec = 1) => (n != null ? Number(n).toFixed(dec) : \"—\");\nconst pct  = (n)          => (n != null ? (n * 100).toFixed(1) + '%' : \"—\");\nconst brl  = (n)          => (n != null ? 'R$ ' + Number(n).toLocaleString('pt-BR', {minimumFractionDigits:2}) : \"—\");\n\nconst linhasTabela = anonimizado.map(c => `\n  <tr>\n    <td style=\"color:#F7FAFC;font-weight:600\">${c.label}</td>\n    <td style=\"color:#7B2CBF\">${pct(c.margem)}</td>\n    <td style=\"color:#38bdf8\">${brl(c.ticket_medio)}</td>\n    <td style=\"color:#F15BB5\">${pct(c.pct_servicos)}</td>\n    <td style=\"color:#F58216\">${pct(c.pct_produtos)}</td>\n    <td style=\"color:#a78bfa\">${pct(c.pct_pacotes)}</td>\n    <td style=\"color:#68d391\">${pct(c.retencao)}</td>\n    <td style=\"color:${c.tem_pacotes ? '#68d391' : '#fc8181'}\">${c.tem_pacotes ? '✓ Sim' : '✗ Não'}</td>\n  </tr>\n`).join('');\n\nconst html = `<!DOCTYPE html>\n<html lang=\"pt-BR\">\n<head>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<title>eVOLUTA — Benchmark da Rede</title>\n<script src=\"https://cdn.tailwindcss.com\"><\\/script>\n<style>\n  *{box-sizing:border-box;margin:0;padding:0}\n  body{font-family:'Inter','Segoe UI',sans-serif;background:#070e24;color:#F7FAFC}\n  .ev-page{max-width:1280px;margin:0 auto;padding:24px 16px 64px;display:flex;flex-direction:column;gap:24px}\n  .ev-card{background:#111A3A;border-radius:16px;padding:24px;border:1px solid #1A2342}\n  .ev-title{font-size:1rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#A0AEC0;margin-bottom:16px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #1A2342;padding-bottom:10px}\n  .ev-stat{background:#0A1128;border-radius:12px;padding:16px;border:1px solid #1A2342}\n  .ev-label{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#A0AEC0;margin-bottom:4px}\n  .ev-big{font-size:1.8rem;font-weight:900;line-height:1.1}\n  .ev-badge{display:inline-block;padding:3px 10px;border-radius:9999px;font-size:.72rem;font-weight:700}\n  .ev-prose{font-size:.85rem;line-height:1.7;color:#A0AEC0}\n  .ev-table{width:100%;border-collapse:collapse;font-size:.82rem}\n  .ev-table th{padding:10px 14px;text-align:left;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:#A0AEC0;font-weight:700;border-bottom:1px solid #1A2342;white-space:nowrap}\n  .ev-table td{padding:10px 14px;border-bottom:1px solid #1A2342;white-space:nowrap}\n  .ev-grid-5{display:grid;grid-template-columns:repeat(5,1fr);gap:16px}\n  @media(max-width:900px){.ev-grid-5{grid-template-columns:1fr 1fr}}\n  .gradient-text{background:linear-gradient(90deg,#7B2CBF,#F15BB5);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}\n</style>\n</head>\n<body>\n<div class=\"ev-page\">\n\n  <header style=\"background:linear-gradient(135deg,#0A1128,#140826,#1e0d3d);border-radius:20px;padding:40px 36px;border:1px solid #1A2342\">\n    <p style=\"font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#7B2CBF;margin-bottom:6px\">\n      eVOLUTA · Benchmark da Rede\n    </p>\n    <h1 style=\"font-size:2rem;font-weight:900;letter-spacing:-.02em\">\n      Como a rede está<br><span class=\"gradient-text\">performando</span>\n    </h1>\n    <p style=\"margin-top:10px;color:#A0AEC0;font-size:.9rem\">\n      Dados anonimizados · <strong style=\"color:#F7FAFC\">${total} barbearias</strong> · Referência: ${mes}\n    </p>\n  </header>\n\n  <div class=\"ev-grid-5\">\n    <div class=\"ev-stat\" style=\"border-top:3px solid #7B2CBF\">\n      <p class=\"ev-label\">Margem Média</p>\n      <p class=\"ev-big\" style=\"color:#7B2CBF\">${pct(media.margem)}</p>\n    </div>\n    <div class=\"ev-stat\" style=\"border-top:3px solid #38bdf8\">\n      <p class=\"ev-label\">Ticket Médio</p>\n      <p class=\"ev-big\" style=\"color:#38bdf8\">${brl(media.ticket_medio)}</p>\n    </div>\n    <div class=\"ev-stat\" style=\"border-top:3px solid #F15BB5\">\n      <p class=\"ev-label\">% Serviços</p>\n      <p class=\"ev-big\" style=\"color:#F15BB5\">${pct(media.pct_servicos)}</p>\n    </div>\n    <div class=\"ev-stat\" style=\"border-top:3px solid #F58216\">\n      <p class=\"ev-label\">% Produtos</p>\n      <p class=\"ev-big\" style=\"color:#F58216\">${pct(media.pct_produtos)}</p>\n    </div>\n    <div class=\"ev-stat\" style=\"border-top:3px solid #a78bfa\">\n      <p class=\"ev-label\">% Pacotes</p>\n      <p class=\"ev-big\" style=\"color:#a78bfa\">${pct(media.pct_pacotes)}</p>\n    </div>\n    <div class=\"ev-stat\" style=\"border-top:3px solid #68d391\">\n      <p class=\"ev-label\">Taxa de Retorno</p>\n      <p class=\"ev-big\" style=\"color:#68d391\">${pct(media.retencao)}</p>\n    </div>\n    <div class=\"ev-stat\" style=\"border-top:3px solid #F58216\">\n      <p class=\"ev-label\">Vendem Pacotes</p>\n      <p class=\"ev-big\" style=\"color:#F58216\">${comPacotes}/${total}</p>\n    </div>\n  </div>\n\n  <section class=\"ev-card\" style=\"border-top:4px solid #7B2CBF\">\n    <h2 class=\"ev-title\">\n      <span class=\"ev-badge\" style=\"background:#7B2CBF;color:#fff\">★</span>\n      Análise da Rede\n    </h2>\n    <p class=\"ev-prose\">${insight}</p>\n  </section>\n\n  <section class=\"ev-card\" style=\"border-top:4px solid #1A2342\">\n    <h2 class=\"ev-title\">Comparativo Detalhado</h2>\n    <div style=\"overflow-x:auto\">\n      <table class=\"ev-table\">\n        <thead>\n          <tr>\n            <th>Barbearia</th>\n            <th>Margem</th>\n            <th>Ticket Médio</th>\n            <th>% Serviços</th>\n            <th>% Produtos</th>\n            <th>% Pacotes</th>\n            <th>Retorno</th>\n            <th>Pacotes</th>\n          </tr>\n        </thead>\n        <tbody>${linhasTabela}</tbody>\n      </table>\n    </div>\n  </section>\n\n  <p style=\"text-align:center;color:#475569;font-size:.75rem;padding-top:8px\">\n    Dados anonimizados e embaralhados a cada geração · eVOLUTA Business Intelligence\n  </p>\n\n</div>\n</body>\n</html>`;\n\nreturn [{ json: { html, mes, total_clientes: total } }];"
+      }
+    },
+    {
+      "id": "node-011-http-save-benchmark",
+      "name": "HTTP - Salvar benchmark",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2640, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3000/api/benchmark",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ mes: $json.mes, html: $json.html, total_clientes: $json.total_clientes }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-012-respond",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2880, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, mes: $(\"Webhook\").first().json.mes, total_clientes: $(\"Code - Calcular benchmark\").first().json.total }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [{ "node": "MongoDB - Buscar snapshots", "type": "main", "index": 0 }]
+      ]
+    },
+    "MongoDB - Buscar snapshots": {
+      "main": [
+        [{ "node": "MongoDB - Buscar service_categories", "type": "main", "index": 0 }]
+      ]
+    },
+    "MongoDB - Buscar service_categories": {
+      "main": [
+        [{ "node": "Code - Extrair nomes novos", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code - Extrair nomes novos": {
+      "main": [
+        [{ "node": "IF - Tem nomes novos", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF - Tem nomes novos": {
+      "main": [
+        [{ "node": "LLM Chain - Normalizar", "type": "main", "index": 0 }],
+        [{ "node": "Code - Calcular benchmark", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gemini Flash - Normalizar": {
+      "ai_languageModel": [
+        [{ "node": "LLM Chain - Normalizar", "type": "ai_languageModel", "index": 0 }]
+      ]
+    },
+    "LLM Chain - Normalizar": {
+      "main": [
+        [{ "node": "HTTP - Salvar categorias", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP - Salvar categorias": {
+      "main": [
+        [{ "node": "Code - Calcular benchmark", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code - Calcular benchmark": {
+      "main": [
+        [{ "node": "LLM Chain - Insight", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gemini Flash - Insight": {
+      "ai_languageModel": [
+        [{ "node": "LLM Chain - Insight", "type": "ai_languageModel", "index": 0 }]
+      ]
+    },
+    "LLM Chain - Insight": {
+      "main": [
+        [{ "node": "Code - Montar HTML", "type": "main", "index": 0 }]
+      ]
+    },
+    "Code - Montar HTML": {
+      "main": [
+        [{ "node": "HTTP - Salvar benchmark", "type": "main", "index": 0 }]
+      ]
+    },
+    "HTTP - Salvar benchmark": {
+      "main": [
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["evoluta", "benchmark", "w3"],
+  "triggerCount": 0,
+  "versionId": "w3-benchmark-003"
+}

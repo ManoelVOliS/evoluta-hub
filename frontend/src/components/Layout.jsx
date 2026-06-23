@@ -51,6 +51,7 @@ const links = [
   { to:'/prospects', label:'Prospects',  icon:'◑' },
   { to:'/calendar',   label:'Calendário',  icon:'◻' },
   { to:'/relatorios', label:'Relatórios',  icon:'◪' },
+  { to:'/benchmark',  label:'Benchmark',   icon:'◬' },
   { to:'/backlog', label:'Backlog', icon:'◈' },
   { to:'/plan', label:'Plano 30 dias', icon:'◷' },
   { to:'/trl', label:'Análise TRL', icon:'◎' },
