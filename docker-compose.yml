@@ -5,35 +5,24 @@ services:
     restart: unless-stopped
     networks:
       - evoluta-net
-      - n8n_net     # rede interna do stack do n8n — ajuste o nome abaixo
     environment:
       - NODE_ENV=production
-    env_file:
-      - .env
+      - PORT=3007
+      - MONGO_URI=mongodb://admin:34331267@100.76.56.62:27017/evoluta-hub?authSource=admin
+      - JWT_SECRET=            # gere com: openssl rand -base64 32
+      - ADMIN_PASSWORD=34331267
+      - ALLOWED_ORIGIN=https://hub.evoluta.online
+      - N8N_WEBHOOK_EXTRAIR=https://n8n.manoelvolis.online/webhook/ea5a181e-71b6-43b1-b7c2-b2ef096e54f6
+      - N8N_WEBHOOK_RELATORIO=https://n8n.manoelvolis.online/webhook/7e1419d5-2155-4335-a88a-0706b8ee2a6f
+      - N8N_WEBHOOK_BENCHMARK=https://n8n.manoelvolis.online/webhook/benchmark/gerar
     volumes:
       - ./content:/app/content
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:3007/health"]
       interval: 30s
       timeout: 5s
       retries: 3
 
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: evoluta-cloudflared
-    restart: unless-stopped
-    command: tunnel --no-autoupdate run
-    environment:
-      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
-    networks:
-      - evoluta-net
-    depends_on:
-      app:
-        condition: service_healthy
-
 networks:
   evoluta-net:
     driver: bridge
-  n8n_net:
-    external: true
-    name: NOME_DA_REDE_DO_N8N   # substitua pelo nome real (ex: n8n_default, n8n-stack_default)
