@@ -6,23 +6,35 @@ const headers = () => ({
 })
 
 const req = async (method, path, body) => {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: headers(),
-    body: body ? JSON.stringify(body) : undefined
-  })
+  let res
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: headers(),
+      body: body ? JSON.stringify(body) : undefined
+    })
+  } catch (e) {
+    window.dispatchEvent(new CustomEvent('api:error', { detail: 'Sem conexão com o servidor' }))
+    throw e
+  }
   if (res.status === 401) {
-    const body = await res.json().catch(() => ({}))
-    if (body.expired) sessionStorage.setItem('auth_msg', 'Sua sessão expirou. Faça login novamente.')
+    const data = await res.json().catch(() => ({}))
+    if (data.expired) sessionStorage.setItem('auth_msg', 'Sua sessão expirou. Faça login novamente.')
     localStorage.removeItem('token')
     window.location.href = '/login'
     return
+  }
+  if (res.status >= 500) {
+    const data = await res.json().catch(() => ({}))
+    const msg  = data.error || `Erro ${res.status} no servidor`
+    window.dispatchEvent(new CustomEvent('api:error', { detail: msg }))
+    throw new Error(msg)
   }
   return res.json()
 }
 
 export const api = {
-  login:  (password) => req('POST', '/auth/login', { password }),
+  login:  (data) => req('POST', '/auth/login', typeof data === 'string' ? { password: data } : data),
   backlog: {
     list:   () => req('GET', '/backlog'),
     create: (d) => req('POST', '/backlog', d),
@@ -82,5 +94,11 @@ export const api = {
     list:   ()    => req('GET',  '/benchmark'),
     get:    (mes) => req('GET',  `/benchmark/${mes}`),
     gerar:  (mes) => req('POST', '/benchmark/gerar', { mes }),
+  },
+  users: {
+    list:   ()       => req('GET',    '/users'),
+    create: (d)      => req('POST',   '/users', d),
+    update: (id, d)  => req('PUT',    `/users/${id}`, d),
+    delete: (id)     => req('DELETE', `/users/${id}`),
   },
 }

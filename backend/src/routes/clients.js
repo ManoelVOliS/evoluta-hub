@@ -1,8 +1,22 @@
-const router = require('express').Router()
-const auth   = require('../middleware/auth')
+const router    = require('express').Router()
+const auth      = require('../middleware/auth')
+const adminOnly = require('../middleware/adminOnly')
 const { Client, Report } = require('../models')
 
 router.use(auth)
+
+// Middleware que verifica se cliente pode acessar apenas seu próprio clientId
+const clientGuard = (req, res, next) => {
+  if (req.user.role === 'admin') return next()
+  if (req.user.role === 'client') {
+    if (!req.user.clientId) return res.status(403).json({ error: 'Sem cliente vinculado' })
+    if (req.params.id && req.params.id !== req.user.clientId) {
+      return res.status(403).json({ error: 'Acesso negado' })
+    }
+    return next()
+  }
+  res.status(403).json({ error: 'Acesso negado' })
+}
 
 /* ── Resumo geral de relatórios ── */
 
@@ -26,21 +40,27 @@ router.get('/reports-summary', async (req, res) => {
 /* ── Clientes ── */
 
 router.get('/', async (req, res) => {
+  // Usuário client vê apenas o próprio cliente
+  if (req.user.role === 'client') {
+    if (!req.user.clientId) return res.json([])
+    const client = await Client.findById(req.user.clientId)
+    return res.json(client ? [client] : [])
+  }
   const clients = await Client.find().sort({ createdAt: -1 })
   res.json(clients)
 })
 
-router.post('/', async (req, res) => {
+router.post('/', adminOnly, async (req, res) => {
   const client = await Client.create(req.body)
   res.status(201).json(client)
 })
 
-router.put('/:id', async (req, res) => {
+router.put('/:id', adminOnly, async (req, res) => {
   const client = await Client.findByIdAndUpdate(req.params.id, req.body, { new: true })
   res.json(client)
 })
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', adminOnly, async (req, res) => {
   await Client.findByIdAndDelete(req.params.id)
   await Report.deleteMany({ clientId: req.params.id })
   res.json({ ok: true })
@@ -48,7 +68,7 @@ router.delete('/:id', async (req, res) => {
 
 /* ── Relatórios por cliente ── */
 
-router.get('/:id/reports', async (req, res) => {
+router.get('/:id/reports', clientGuard, async (req, res) => {
   const reports = await Report.find({ clientId: req.params.id }, { html: 0 }).sort({ mes: -1 })
   res.json(reports)
 })
@@ -69,7 +89,7 @@ router.post('/:id/reports', async (req, res) => {
   res.status(201).json(report)
 })
 
-router.get('/:id/reports/:rid', async (req, res) => {
+router.get('/:id/reports/:rid', clientGuard, async (req, res) => {
   const report = await Report.findOne({ _id: req.params.rid, clientId: req.params.id })
   if (!report) return res.status(404).json({ error: 'Não encontrado' })
   res.json(report)

@@ -55,7 +55,8 @@ const links = [
   { to:'/backlog', label:'Backlog', icon:'◈' },
   { to:'/plan', label:'Plano 30 dias', icon:'◷' },
   { to:'/trl', label:'Análise TRL', icon:'◎' },
-  { to:'/content', label:'Notas .md', icon:'◫' },
+  { to:'/content',   label:'Notas .md',  icon:'◫' },
+  { to:'/usuarios',  label:'Usuários',   icon:'◑' },
 ]
 
 export default function Layout() {

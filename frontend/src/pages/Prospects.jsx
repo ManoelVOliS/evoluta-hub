@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { api } from '../api'
+import { useToast } from '../components/Toast'
 
 const STATUS_ORDER = ['identificado', 'abordado', 'em negociação', 'convertido', 'descartado']
 const STATUS_COLOR = {
@@ -14,8 +15,11 @@ const STATUS_NEXT = {
   abordado:     'em negociação',
 }
 
+const MOTORS = ['CashBarber', 'Trink', 'AppBarber', 'Múltiplos', 'Outro']
 const ATIVOS = ['identificado', 'abordado', 'em negociação']
 const EMPTY  = { nome: '', contato: '', num_cadeiras: 0, status: 'identificado', observacoes: '' }
+
+const EMPTY_CONVERT = { empresa: '', motor: 'CashBarber', cnpj: '', telefone: '' }
 
 const daysSince = (date) => {
   if (!date) return null
@@ -32,11 +36,15 @@ const StatusBadge = ({ status }) => (
 )
 
 export default function Prospects() {
-  const [items,        setItems]        = useState([])
-  const [form,         setForm]         = useState(EMPTY)
-  const [editing,      setEditing]      = useState(null)
-  const [showForm,     setShowForm]     = useState(false)
-  const [filterStatus, setFilterStatus] = useState('ativos')
+  const toast = useToast()
+  const [items,         setItems]         = useState([])
+  const [form,          setForm]          = useState(EMPTY)
+  const [editing,       setEditing]       = useState(null)
+  const [showForm,      setShowForm]      = useState(false)
+  const [filterStatus,  setFilterStatus]  = useState('ativos')
+  const [convertModal,  setConvertModal]  = useState(null)  // prospect | null
+  const [convertForm,   setConvertForm]   = useState(EMPTY_CONVERT)
+  const [converting,    setConverting]    = useState(false)
 
   const load = () => api.prospects.list().then(setItems)
   useEffect(() => { load() }, [])
@@ -61,6 +69,24 @@ export default function Prospects() {
   const advance = async (p, nextStatus) => {
     await api.prospects.update(p._id, { ...p, status: nextStatus })
     load()
+  }
+
+  const openConvert = (p) => {
+    setConvertForm({ empresa: p.nome, motor: 'CashBarber', cnpj: '', telefone: p.contato || '' })
+    setConvertModal(p)
+  }
+
+  const doConvert = async () => {
+    if (!convertForm.empresa.trim()) return
+    setConverting(true)
+    try {
+      await api.clients.create({ ...convertForm, ativo: true })
+      toast('Cliente criado com sucesso!', 'success')
+      setConvertModal(null)
+    } catch (e) {
+      toast(e.message || 'Erro ao criar cliente')
+    }
+    setConverting(false)
   }
 
   const inputStyle = {
@@ -241,6 +267,13 @@ export default function Prospects() {
                           color: '#F85149', cursor: 'pointer', fontSize: 11
                         }}>✗</button>
                       </>)}
+                      {p.status === 'convertido' && (
+                        <button onClick={() => openConvert(p)} style={{
+                          flex: 1, background: '#3EBD7C22', border: '1px solid #3EBD7C55',
+                          borderRadius: 'var(--radius)', padding: '5px 8px',
+                          color: '#3EBD7C', cursor: 'pointer', fontSize: 11, fontWeight: 500
+                        }}>+ Criar como Cliente</button>
+                      )}
                       <button onClick={() => edit(p)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '5px 8px', color: 'var(--muted)', cursor: 'pointer', fontSize: 11 }}>✎</button>
                       <button onClick={() => del(p)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '5px 8px', color: 'var(--muted)', cursor: 'pointer', fontSize: 12 }}>×</button>
                     </div>
@@ -250,6 +283,54 @@ export default function Prospects() {
             </div>
           </div>
         ))
+      )}
+
+      {/* Modal: Converter em Cliente */}
+      {convertModal && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.6)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:16 }}
+          onClick={e => { if (e.target === e.currentTarget) setConvertModal(null) }}>
+          <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', width:'100%', maxWidth:480, padding:24 }}>
+            <div style={{ fontSize:14, fontWeight:700, marginBottom:4 }}>Criar Cliente a partir de Prospect</div>
+            <div style={{ fontSize:12, color:'var(--muted)', marginBottom:18 }}>
+              <strong style={{ color:'var(--primary)' }}>{convertModal.nome}</strong> será criado como cliente no sistema.
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:12 }}>
+              <div style={{ gridColumn:'1/-1' }}>
+                <div style={{ fontSize:11, color:'var(--muted)', marginBottom:4 }}>Nome da empresa *</div>
+                <input value={convertForm.empresa} onChange={e => setConvertForm(f => ({ ...f, empresa: e.target.value }))}
+                  style={inputStyle} placeholder="Nome da barbearia" />
+              </div>
+              <div>
+                <div style={{ fontSize:11, color:'var(--muted)', marginBottom:4 }}>Sistema (motor) *</div>
+                <select value={convertForm.motor} onChange={e => setConvertForm(f => ({ ...f, motor: e.target.value }))} style={inputStyle}>
+                  {MOTORS.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={{ fontSize:11, color:'var(--muted)', marginBottom:4 }}>Telefone / WhatsApp</div>
+                <input value={convertForm.telefone} onChange={e => setConvertForm(f => ({ ...f, telefone: e.target.value }))}
+                  style={inputStyle} placeholder="(11) 99999-9999" />
+              </div>
+              <div style={{ gridColumn:'1/-1' }}>
+                <div style={{ fontSize:11, color:'var(--muted)', marginBottom:4 }}>CNPJ</div>
+                <input value={convertForm.cnpj} onChange={e => setConvertForm(f => ({ ...f, cnpj: e.target.value }))}
+                  style={inputStyle} placeholder="00.000.000/0001-00" />
+              </div>
+            </div>
+            <div style={{ display:'flex', gap:8 }}>
+              <button onClick={doConvert} disabled={converting || !convertForm.empresa.trim()} style={{
+                flex:1, background: convertForm.empresa.trim() ? 'var(--gradient)' : 'var(--border)',
+                border:'none', borderRadius:'var(--radius)', padding:'9px 0', color:'#fff',
+                cursor: convertForm.empresa.trim() ? 'pointer' : 'not-allowed', fontSize:13, fontWeight:500
+              }}>
+                {converting ? 'Criando...' : 'Criar Cliente'}
+              </button>
+              <button onClick={() => setConvertModal(null)} style={{ background:'none', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'9px 16px', color:'var(--muted)', cursor:'pointer', fontSize:13 }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

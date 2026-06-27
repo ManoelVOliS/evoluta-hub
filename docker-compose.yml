@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     networks:
       - evoluta-net
+      - n8n_net     # rede interna do stack do n8n — ajuste o nome abaixo
     environment:
       - NODE_ENV=production
     env_file:
@@ -33,3 +34,6 @@ services:
 networks:
   evoluta-net:
     driver: bridge
+  n8n_net:
+    external: true
+    name: NOME_DA_REDE_DO_N8N   # substitua pelo nome real (ex: n8n_default, n8n-stack_default)

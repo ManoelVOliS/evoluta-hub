@@ -88,6 +88,15 @@ const CalEventSchema = new mongoose.Schema({
   createdAt:  { type: Date, default: Date.now }
 })
 
+const UserSchema = new mongoose.Schema({
+  email:        { type: String, required: true, unique: true, lowercase: true, trim: true },
+  passwordHash: { type: String, required: true },
+  nome:         { type: String, default: '' },
+  role:         { type: String, enum: ['admin', 'client'], default: 'client' },
+  clientId:     { type: mongoose.Schema.Types.ObjectId, ref: 'Client', default: null },
+  createdAt:    { type: Date, default: Date.now }
+})
+
 const ServiceCategorySchema = new mongoose.Schema({
   nome_original: { type: String, required: true, unique: true },
   categoria:     { type: String, required: true },
@@ -111,6 +120,7 @@ module.exports = {
   Report:           mongoose.model('Report', ReportSchema),
   Prospect:         mongoose.model('Prospect', ProspectSchema),
   CalEvent:         mongoose.model('CalEvent', CalEventSchema),
+  User:             mongoose.model('User', UserSchema),
   ServiceCategory:  mongoose.model('ServiceCategory', ServiceCategorySchema),
   BenchmarkPage:    mongoose.model('BenchmarkPage', BenchmarkPageSchema),
 }

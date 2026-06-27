@@ -23,9 +23,12 @@ router.put('/', async (req, res) => {
   if (mrr !== undefined)            m.mrr            = mrr
   if (pricePerClient !== undefined) m.pricePerClient = pricePerClient
   if (planStartDate  !== undefined) m.planStartDate  = planStartDate || null
+  const changed = m.mrr !== (mrr ?? m.mrr) || m.clients !== (clients ?? m.clients)
   m.updatedAt = new Date()
   await m.save()
-  await MetricsHistory.create({ clients: m.clients, mrr: m.mrr, pricePerClient: m.pricePerClient })
+  if (changed) {
+    await MetricsHistory.create({ clients: m.clients, mrr: m.mrr, pricePerClient: m.pricePerClient })
+  }
   res.json(m)
 })
 

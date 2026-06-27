@@ -489,119 +489,108 @@ function SyncWizard({ client, onSaved }) {
   )
 }
 
-/* ── Modal editar relatório ── */
-const CAMPOS = [
-  { secao:'Financeiro', path:'financeiro.entrada',                label:'Faturamento Bruto',   tipo:'moeda'  },
-  { secao:'Financeiro', path:'financeiro.saida',                  label:'Despesas / Saída',    tipo:'moeda'  },
-  { secao:'Financeiro', path:'financeiro.comissao_total',         label:'Comissões Pagas',     tipo:'moeda'  },
-  { secao:'Financeiro', path:'financeiro.lucro_real',             label:'Lucro Real',          tipo:'moeda'  },
-  { secao:'Clientes',   path:'clientes.base_total',               label:'Retorno de Clientes', tipo:'numero' },
-  { secao:'Clientes',   path:'clientes.novos_marco',              label:'Novos Clientes',      tipo:'numero' },
-  { secao:'Produtos',   path:'produtos.quantidade_total_vendida', label:'Itens Vendidos',      tipo:'numero' },
-  { secao:'Meta',       path:'meta.mes_analisado',                label:'Mês analisado',       tipo:'texto'  },
-]
-const getPath = (obj, path) => path.split('.').reduce((o, k) => o?.[k] ?? '', obj)
-const setPath = (obj, path, value) => {
-  const keys  = path.split('.')
-  const clone = JSON.parse(JSON.stringify(obj || {}))
-  let cur = clone
-  for (let i = 0; i < keys.length - 1; i++) { if (!cur[keys[i]]) cur[keys[i]] = {}; cur = cur[keys[i]] }
-  cur[keys[keys.length - 1]] = value
-  return clone
-}
-
+/* ── Modal editar relatório (WYSIWYG contentEditable) ── */
 function EditReportModal({ clientId, report, onClose, onSaved }) {
-  const [numeros,     setNumeros]     = useState(report.numeros     || {})
-  const [observacoes, setObservacoes] = useState(report.observacoes || '')
-  const [previewHtml, setPreviewHtml] = useState(report.html        || '')
-  const [previewing,  setPreviewing]  = useState(false)
+  const iframeRef             = useRef(null)
+  const [ready,       setReady]       = useState(false)
   const [saving,      setSaving]      = useState(false)
   const [erro,        setErro]        = useState('')
+  const [observacoes, setObservacoes] = useState(report.observacoes || '')
+  const [showObs,     setShowObs]     = useState(false)
 
-  const secoes = [...new Set(CAMPOS.map(c => c.secao))]
-  const upd    = (path, val) => setNumeros(prev => setPath(prev, path, val))
-
-  const doPreview = async () => {
-    setPreviewing(true); setErro('')
-    try { setPreviewHtml(await gerarRelatorioHTML(numeros)) }
-    catch (e) { setErro(e.message) }
-    setPreviewing(false)
+  const onLoad = () => {
+    const doc = iframeRef.current?.contentDocument
+    if (!doc) return
+    doc.body.contentEditable = 'true'
+    doc.body.style.outline   = 'none'
+    const style = doc.createElement('style')
+    style.textContent = `
+      body { cursor: text; }
+      *:focus { outline: 2px solid rgba(88,166,255,.35) !important; outline-offset: 1px; border-radius: 2px; }
+      *::selection { background: rgba(88,166,255,.25); }
+    `
+    doc.head.appendChild(style)
+    setReady(true)
   }
 
   const doSave = async () => {
     setSaving(true); setErro('')
     try {
-      const html = previewHtml || await gerarRelatorioHTML(numeros)
-      await api.clients.reports.update(clientId, report._id, { html, numeros, observacoes })
+      const doc     = iframeRef.current?.contentDocument
+      const newHtml = doc ? `<!DOCTYPE html>${doc.documentElement.outerHTML}` : report.html
+      await api.clients.reports.update(clientId, report._id, { html: newHtml, observacoes })
       onSaved(); onClose()
     } catch (e) { setErro(e.message) }
     setSaving(false)
   }
 
-  const inputS = { background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'7px 10px', color:'var(--text)', fontSize:13, width:'100%' }
+  const btn = (extra = {}) => ({
+    border:'none', borderRadius:'var(--radius)', padding:'7px 14px',
+    cursor:'pointer', fontSize:12, fontWeight:500, ...extra
+  })
 
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.65)', zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', padding:12 }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', width:'100%', maxWidth:980, maxHeight:'92vh', display:'flex', flexDirection:'column' }}>
+    <div
+      style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.65)', zIndex:1000, display:'flex', alignItems:'stretch', justifyContent:'center', padding:12 }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:'var(--radius)', width:'100%', maxWidth:1100, display:'flex', flexDirection:'column', overflow:'hidden' }}>
 
-        <div style={{ display:'flex', alignItems:'center', gap:12, padding:'14px 20px', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
-          <div style={{ flex:1 }}>
-            <div style={{ fontSize:14, fontWeight:700 }}>Editar relatório · {report.mes}</div>
-            <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>Ajuste os dados e clique em Salvar para regenerar o HTML via IA.</div>
+        {/* Toolbar */}
+        <div style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 16px', borderBottom:'1px solid var(--border)', flexShrink:0, flexWrap:'wrap' }}>
+          <div style={{ flex:1, minWidth:0 }}>
+            <span style={{ fontSize:13, fontWeight:600 }}>
+              Editar — <span style={{ color:'var(--primary)' }}>{report.mes}</span>
+            </span>
+            <span style={{ fontSize:11, color:'var(--muted)', marginLeft:10 }}>
+              Clique em qualquer texto ou número para editar diretamente
+            </span>
           </div>
-          <button onClick={onClose} style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:22, lineHeight:1, padding:'0 4px' }}>×</button>
+          <button
+            onClick={() => setShowObs(s => !s)}
+            style={btn({ background:'var(--surface2)', border:'1px solid var(--border)', color:'var(--muted)' })}
+          >
+            {showObs ? 'Ocultar obs.' : 'Observações'}
+          </button>
+          {erro && <span style={{ fontSize:11, color:'var(--red)' }}>{erro}</span>}
+          <button onClick={onClose} style={btn({ background:'var(--surface2)', border:'1px solid var(--border)', color:'var(--muted)' })}>
+            Cancelar
+          </button>
+          <button onClick={doSave} disabled={saving || !ready}
+            style={btn({ background: ready ? 'var(--gradient)' : 'var(--border)', color:'#fff', cursor: ready ? 'pointer' : 'not-allowed' })}>
+            {saving ? 'Salvando...' : 'Salvar'}
+          </button>
         </div>
 
-        <div style={{ display:'flex', flex:1, overflow:'hidden' }}>
-          <div style={{ width:320, flexShrink:0, padding:'16px 20px', overflowY:'auto', borderRight:'1px solid var(--border)', display:'flex', flexDirection:'column', gap:0 }}>
-            {secoes.map(secao => (
-              <div key={secao} style={{ marginBottom:18 }}>
-                <div style={{ fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:1, marginBottom:10 }}>{secao}</div>
-                {CAMPOS.filter(c => c.secao === secao).map(campo => (
-                  <div key={campo.path} style={{ marginBottom:8 }}>
-                    <div style={{ fontSize:11, color:'var(--muted)', marginBottom:3 }}>{campo.label}</div>
-                    <input
-                      type={campo.tipo === 'texto' ? 'text' : 'number'}
-                      value={getPath(numeros, campo.path)}
-                      onChange={e => upd(campo.path, campo.tipo === 'texto' ? e.target.value : +e.target.value)}
-                      style={inputS}
-                    />
-                  </div>
-                ))}
-              </div>
-            ))}
-
-            <div style={{ marginBottom:16 }}>
-              <div style={{ fontSize:10, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:1, marginBottom:10 }}>Observações</div>
-              <textarea value={observacoes} onChange={e => setObservacoes(e.target.value)}
-                placeholder="Notas internas sobre este relatório..."
-                rows={4} style={{ ...inputS, resize:'vertical' }} />
-            </div>
-
-            {erro && <div style={{ fontSize:12, color:'var(--red)', padding:'8px 10px', background:'rgba(248,81,73,.1)', borderRadius:'var(--radius)', marginBottom:12 }}>{erro}</div>}
-
-            <div style={{ display:'flex', gap:8, marginTop:'auto', paddingTop:8 }}>
-              <button onClick={doPreview} disabled={previewing} style={{ flex:1, background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'8px 10px', color:'var(--muted)', cursor: previewing ? 'not-allowed' : 'pointer', fontSize:12 }}>
-                {previewing ? 'Gerando...' : '▶ Preview'}
-              </button>
-              <button onClick={doSave} disabled={saving} style={{ flex:1, background:'var(--gradient)', border:'none', borderRadius:'var(--radius)', padding:'8px 10px', color:'#fff', cursor: saving ? 'not-allowed' : 'pointer', fontSize:12, fontWeight:500 }}>
-                {saving ? 'Salvando...' : 'Salvar'}
-              </button>
-            </div>
+        {/* Observações colapsável */}
+        {showObs && (
+          <div style={{ padding:'10px 16px', borderBottom:'1px solid var(--border)', flexShrink:0 }}>
+            <div style={{ fontSize:11, color:'var(--muted)', marginBottom:4 }}>Observações internas</div>
+            <textarea
+              value={observacoes}
+              onChange={e => setObservacoes(e.target.value)}
+              placeholder="Notas internas sobre este relatório..."
+              rows={3}
+              style={{ background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'7px 10px', color:'var(--text)', fontSize:13, width:'100%', resize:'vertical' }}
+            />
           </div>
+        )}
 
-          <div style={{ flex:1, display:'flex', flexDirection:'column', background:'#fff', overflow:'hidden' }}>
-            {previewHtml ? (
-              <iframe srcDoc={previewHtml} style={{ flex:1, border:'none', width:'100%' }} title="preview" />
-            ) : (
-              <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:'#999', fontSize:13, flexDirection:'column', gap:8 }}>
-                <span style={{ fontSize:32 }}>▶</span>
-                Clique em Preview para ver o relatório atualizado
-              </div>
-            )}
+        {/* Loader */}
+        {!ready && (
+          <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--muted)', fontSize:13 }}>
+            Carregando relatório...
           </div>
-        </div>
+        )}
+
+        {/* Editor WYSIWYG */}
+        <iframe
+          ref={iframeRef}
+          srcDoc={report.html}
+          onLoad={onLoad}
+          style={{ flex:1, border:'none', width:'100%', display: ready ? 'block' : 'none' }}
+          title="editor-relatorio"
+        />
       </div>
     </div>
   )
@@ -615,32 +604,61 @@ function ReportsPanel({ client, onBack }) {
   const [html,     setHtml]     = useState('')
   const [tipoAdd,  setTipoAdd]  = useState('mensal')
   const [quinzAdd, setQuinzAdd] = useState('Q1')
-  const [loading,  setLoading]  = useState(false)
-  const [editModal,setEditModal]= useState(null)
-  const [activeTab,setActiveTab]= useState('relatorios')
-  const [tipoEvol, setTipoEvol] = useState('mensal')
+  const [loading,    setLoading]    = useState(false)
+  const [editModal,  setEditModal]  = useState(null)
+  const [activeTab,  setActiveTab]  = useState('relatorios')
+  const [tipoEvol,   setTipoEvol]   = useState('mensal')
+  const [sheetFiles, setSheetFiles] = useState([])
+  const [sheetStep,  setSheetStep]  = useState(null) // null | 'extraindo' | 'extraido' | 'gerando' | 'erro'
+  const [sheetNums,  setSheetNums]  = useState(null)
+  const [sheetErro,  setSheetErro]  = useState('')
 
   const load = () => api.clients.reports.list(client._id).then(setReports)
   useEffect(() => { load() }, [client._id])
 
-  const handleFile = (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = (ev) => setHtml(ev.target.result)
-    reader.readAsText(file)
+  const handleFiles = async (files) => {
+    const arr = Array.from(files)
+    if (!arr.length) return
     if (!mes) {
-      const m = file.name.match(/(\d{2}[-_]?\d{4}|\d{4}[-_]?\d{2})/)
-      if (m) setMes(m[0].replace(/[-_]/g, '/'))
+      for (const f of arr) {
+        const m = f.name.match(/(\d{2}[-_]?\d{4}|\d{4}[-_]?\d{2})/)
+        if (m) { setMes(m[0].replace(/[-_]/g, '/')); break }
+      }
+    }
+    const sheets = arr.filter(f => /\.(xlsx|xls|csv)$/i.test(f.name))
+    const htmlFs = arr.filter(f => /\.(html|htm)$/i.test(f.name))
+    if (htmlFs.length > 0) {
+      const reader = new FileReader()
+      reader.onload = ev => setHtml(ev.target.result)
+      reader.readAsText(htmlFs[0])
+      setSheetFiles([]); setSheetStep(null); setSheetNums(null)
+    } else if (sheets.length > 0) {
+      setSheetFiles(sheets); setHtml(''); setSheetErro('')
+      setSheetStep('extraindo')
+      try {
+        const dados = await extrairPlanilhas(sheets, client.motor, [])
+        const nums  = await extrairMetricas(client.motor, dados)
+        setSheetNums(nums); setSheetStep('extraido')
+      } catch (e) { setSheetErro(e.message); setSheetStep('erro') }
     }
   }
+
+  const generateFromSheets = async () => {
+    setSheetStep('gerando'); setSheetErro('')
+    try {
+      const generatedHtml = await gerarRelatorioHTML(sheetNums)
+      setHtml(generatedHtml); setSheetStep(null); setSheetFiles([])
+    } catch (e) { setSheetErro(e.message); setSheetStep('erro') }
+  }
+
+  const resetSheets = () => { setSheetFiles([]); setSheetStep(null); setSheetNums(null); setSheetErro('') }
 
   const save = async () => {
     if (!mes.trim() || !html.trim()) return
     setLoading(true)
     const periodo = tipoAdd === 'quinzenal' ? quinzAdd : null
-    await api.clients.reports.save(client._id, { mes: mes.trim(), html, tipo: tipoAdd, periodo })
-    setMes(''); setHtml(''); setTipoAdd('mensal'); setQuinzAdd('Q1'); setShowAdd(false); load()
+    await api.clients.reports.save(client._id, { mes: mes.trim(), html, numeros: sheetNums || null, tipo: tipoAdd, periodo })
+    setMes(''); setHtml(''); setTipoAdd('mensal'); setQuinzAdd('Q1'); setShowAdd(false); resetSheets(); load()
     setLoading(false)
   }
 
@@ -648,6 +666,18 @@ function ReportsPanel({ client, onBack }) {
     const full = await api.clients.reports.get(client._id, r._id)
     const blob = new Blob([full.html], { type: 'text/html' })
     window.open(URL.createObjectURL(blob), '_blank')
+  }
+
+  const downloadReport = async (r) => {
+    const full = await api.clients.reports.get(client._id, r._id)
+    if (!full?.html) return
+    const blob = new Blob([full.html], { type: 'text/html' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href     = url
+    a.download = `relatorio-${client.empresa.replace(/\s+/g,'-')}-${r.mes.replace('/','-')}.html`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   const del = async (r) => {
@@ -729,14 +759,60 @@ function ReportsPanel({ client, onBack }) {
                   <input placeholder="ex: 06/2026" value={mes} onChange={e => setMes(e.target.value)} style={inputStyle} />
                 </div>
                 <div>
-                  <div style={{ fontSize:11, color:'var(--muted)', marginBottom:4 }}>Arquivo .html</div>
+                  <div style={{ fontSize:11, color:'var(--muted)', marginBottom:4 }}>
+                    Arquivo <span style={{ opacity:.6 }}>.html · .xlsx · .csv (múltiplos aceitos)</span>
+                  </div>
                   <label style={{ ...inputStyle, display:'block', cursor:'pointer', padding:'7px 10px' }}>
-                    {html ? '✓ Arquivo carregado' : 'Escolher arquivo .html'}
-                    <input type="file" accept=".html,.htm" onChange={handleFile} style={{ display:'none' }} />
+                    {html
+                      ? '✓ HTML carregado'
+                      : sheetFiles.length > 0
+                        ? `${sheetFiles.length} planilha${sheetFiles.length !== 1 ? 's' : ''} selecionada${sheetFiles.length !== 1 ? 's' : ''}`
+                        : 'Escolher arquivo(s)'}
+                    <input type="file" accept=".html,.htm,.xlsx,.xls,.csv" multiple
+                      onChange={e => handleFiles(e.target.files)} style={{ display:'none' }} />
                   </label>
                 </div>
               </div>
-              {!html && (
+
+              {/* Fluxo de extração de planilhas */}
+              {(sheetStep === 'extraindo' || sheetStep === 'gerando') && (
+                <div style={{ textAlign:'center', padding:'10px 0', color:'var(--muted)', fontSize:12, marginBottom:8 }}>
+                  {sheetStep === 'extraindo'
+                    ? `Extraindo ${sheetFiles.length} planilha${sheetFiles.length !== 1 ? 's' : ''}...`
+                    : 'Gerando HTML via IA...'}
+                </div>
+              )}
+              {sheetStep === 'extraido' && sheetNums && (
+                <div style={{ marginBottom:12 }}>
+                  <div style={{ fontSize:11, fontWeight:600, color:'#3EBD7C', marginBottom:8 }}>
+                    ✓ Dados extraídos — revise antes de gerar
+                  </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(140px, 1fr))', gap:6, marginBottom:10 }}>
+                    {REVIEW_CAMPOS.map(campo => (
+                      <div key={campo.path} style={{ background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'8px 10px' }}>
+                        <div style={{ fontSize:9, color:'var(--muted)', textTransform:'uppercase', letterSpacing:.5, marginBottom:4 }}>{campo.label}</div>
+                        <input
+                          type={campo.tipo === 'texto' ? 'text' : 'number'}
+                          value={getNumPath(sheetNums, campo.path)}
+                          onChange={e => setSheetNums(prev => setNumPath(prev, campo.path, campo.tipo === 'texto' ? e.target.value : +e.target.value))}
+                          style={{ background:'transparent', border:'none', borderBottom:'1px solid var(--border)', outline:'none', width:'100%', fontSize:13, fontWeight:700, color:'var(--text)', padding:'1px 0' }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <button onClick={generateFromSheets} style={{ background:'var(--gradient)', border:'none', borderRadius:'var(--radius)', padding:'7px 14px', color:'#fff', cursor:'pointer', fontSize:12, fontWeight:500 }}>
+                    Gerar HTML →
+                  </button>
+                </div>
+              )}
+              {sheetStep === 'erro' && (
+                <div style={{ marginBottom:10, fontSize:12, color:'var(--red)', padding:'8px 10px', background:'rgba(248,81,73,.1)', borderRadius:'var(--radius)' }}>
+                  {sheetErro}
+                  <button onClick={resetSheets} style={{ background:'none', border:'none', color:'var(--muted)', cursor:'pointer', fontSize:11, marginLeft:8 }}>Tentar novamente</button>
+                </div>
+              )}
+
+              {!html && !sheetStep && (
                 <textarea
                   placeholder="Ou cole o HTML do relatório aqui..."
                   value={html}
@@ -759,7 +835,7 @@ function ReportsPanel({ client, onBack }) {
                 }}>
                   {loading ? 'Salvando...' : 'Salvar relatório'}
                 </button>
-                <button onClick={() => { setShowAdd(false); setMes(''); setHtml(''); setTipoAdd('mensal'); setQuinzAdd('Q1') }} style={{ background:'none', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'7px 14px', color:'var(--muted)', cursor:'pointer', fontSize:13 }}>
+                <button onClick={() => { setShowAdd(false); setMes(''); setHtml(''); setTipoAdd('mensal'); setQuinzAdd('Q1'); resetSheets() }} style={{ background:'none', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'7px 14px', color:'var(--muted)', cursor:'pointer', fontSize:13 }}>
                   Cancelar
                 </button>
               </div>
@@ -811,6 +887,7 @@ function ReportsPanel({ client, onBack }) {
                         }}>
                           Visualizar
                         </button>
+                        <button onClick={() => downloadReport(r)} title="Baixar .html" style={{ background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 9px', color:'var(--muted)', cursor:'pointer', fontSize:12 }}>↓</button>
                         <button onClick={() => openEdit(r)} title="Editar" style={{ background:'none', border:'1px solid var(--border)', borderRadius:'var(--radius)', padding:'6px 8px', color:'var(--muted)', cursor:'pointer', fontSize:12 }}>✎</button>
                         {rNext && (
                           <button onClick={() => updateStatus(r, rNext)} title={`Marcar como ${rNext}`} style={{
